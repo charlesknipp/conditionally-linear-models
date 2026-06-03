@@ -1,0 +1,7 @@
+# IDE/OS files
+.vscode
+.DS_Store
+
+# julia files
+Manifest.toml
+LocalPreferences.toml
