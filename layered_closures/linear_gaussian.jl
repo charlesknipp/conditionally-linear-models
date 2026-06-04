@@ -14,7 +14,7 @@ function SSMProblems.distribution(prior::GaussianPrior; kwargs...)
     return MvNormal(prior.μ, prior.Σ)
 end
 
-function analytic_init(prior::GaussianPrior)
+function analytic_initialize(prior::GaussianPrior; kwargs...)
     return (prior.μ, prior.Σ)
 end
 
@@ -35,7 +35,9 @@ function SSMProblems.distribution(
     return MvNormal(dynamics.A * state + dynamics.b, dynamics.Q)
 end
 
-function analytic_predict(dynamics::LinearGaussianDynamics, state)
+function analytic_predict(
+    dynamics::LinearGaussianDynamics, iter::Integer, state; kwargs...
+)
     return kalman_predict(state[1], state[2], dynamics.A, dynamics.b, dynamics.Q)
 end
 
@@ -56,7 +58,9 @@ function SSMProblems.distribution(
     return MvNormal(observation.H * state + observation.c, observation.R)
 end
 
-function analytic_update(observation::LinearGaussianObservation, state, data)
+function analytic_update(
+    observation::LinearGaussianObservation, iter::Integer, state, data; kwargs...
+)
     return kalman_update(
         state[1], state[2], observation.H, observation.c, observation.R, data
     )
