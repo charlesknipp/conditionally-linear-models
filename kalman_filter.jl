@@ -1,14 +1,34 @@
 using LinearAlgebra
+using Random
 
 ## ABSTRACT STATE SPACE ####################################################################
 
-abstract type StateSpaceModel end
+abstract type AbstractPrior end
 
-function initialize(model::StateSpaceModel; kwargs...) end
+function simulate(::AbstractRNG, ::AbstractPrior; kwargs...) end
 
-function predict(model::StateSpaceModel, state::Any, iter::Integer; kwargs...) end
+abstract type AbstractDynamics end
 
-function update(model::StateSpaceModel, state::Any, data::Any, iter::Integer; kwargs...) end
+function simulate(::AbstractRNG, ::AbstractDynamics, ::Any, ::Integer; kwargs...) end
+
+abstract type AbstractObservation end
+
+function simulate(::AbstractRNG, ::AbstractObservation, ::Any, ::Integer; kwargs...) end
+
+struct StateSpaceModel{PT<:AbstractPrior,DT<:AbstractDynamics,OT<:AbstractObservation}
+    prior::PT
+    dynamics::DT
+    obseravtion::OT
+end
+
+function simulate(rng::AbstractRNG, model::StateSpaceModel, T::Integer; kwargs...)
+    x0 = simulate(rng, model.prior; kwargs...)
+    xs = fill(simulate(rng, model.dynamics, x0, 1; kwargs...), T)
+    for t in 2:T
+        xs[t] = simulate(rng, model.dynamics, xs[t - 1], t; kwargs...)
+    end
+    return x0, xs, map(t -> simulate(rng, model.obseravtion, xs[t], t; kwargs...), 1:T)
+end
 
 ## KALMAN PREDICT / UPDATE #################################################################
 
@@ -24,16 +44,16 @@ function kalman_update(μ, Σ, H, c, R, y)
     return (μ + K * z, Σ - K * H * Σ), loglikelihood(m, S)
 end
 
-function step(model::StateSpaceModel, state, data, iter; kwargs...)
-    pred_state = predict(model, state, iter; kwargs...)
-    return update(model, pred_state, data, iter; kwargs...)
+function step(rng::AbstractRNG, model::StateSpaceModel, state, data, iter; kwargs...)
+    pred_state = predict(rng, model.dynamics, state, iter; kwargs...)
+    return update(model.obseravtion, pred_state, data, iter; kwargs...)
 end
 
-function filter(model::StateSpaceModel, data; kwargs...)
-    init_state = initialize(model; kwargs...)
-    state = step(model, init_state, data[1], 1; kwargs...)
-    for t in eachindex(data)
-        state = step(model, state, data[t], t; kwargs...)
+function filter(rng::AbstractRNG, model::StateSpaceModel, data; kwargs...)
+    init_state = initialize(rng, model.prior; kwargs...)
+    state = step(rng, model, init_state, data[1], 1; kwargs...)
+    for t in 2:length(data)
+        state = step(rng, model, state, data[t], t; kwargs...)
     end
     return state
 end
