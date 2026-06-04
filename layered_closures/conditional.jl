@@ -17,13 +17,14 @@ function SSMProblems.simulate(rng::AbstractRNG, prior::ConditionalPrior; kwargs.
     return (; x, z)
 end
 
-function SSMProblems.logdensity(prior::ConditionalPrior, state; kwargs...)
-    outer_logprob = SSMProblems.logdensity(prior.outer_process, iter, state.x; kwargs...)
-    inner_logprob = SSMProblems.logdensity(
-        prior.inner_process(state.x; kwargs...), iter, state.z; kwargs...
-    )
-    return outer_logprob + inner_logprob
-end
+# TODO: just noticed we don't define logdensity on a StatePrior in SSMProblems
+# function SSMProblems.logdensity(prior::ConditionalPrior, state; kwargs...)
+#     outer_logprob = SSMProblems.logdensity(prior.outer_process, iter, state.x; kwargs...)
+#     inner_logprob = SSMProblems.logdensity(
+#         prior.inner_process(state.x; kwargs...), iter, state.z; kwargs...
+#     )
+#     return outer_logprob + inner_logprob
+# end
 
 function initialize(rng::AbstractRNG, prior::ConditionalPrior; kwargs...)
     x = simulate(rng, prior.outer_process; kwargs...)
