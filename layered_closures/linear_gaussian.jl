@@ -5,13 +5,13 @@
 
 For all intents and purposes, this is an MvNormal
 """
-struct GaussianPrior{MT,ΣT} <: AbstractPrior
+struct GaussianPrior{MT,ΣT} <: StatePrior
     μ::MT
     Σ::ΣT
 end
 
-function simulate(rng::AbstractRNG, prior::GaussianPrior; kwargs...)
-    return rand(rng, MvNormal(prior.μ, prior.Σ))
+function SSMProblems.distribution(prior::GaussianPrior; kwargs...)
+    return MvNormal(prior.μ, prior.Σ)
 end
 
 function analytic_init(prior::GaussianPrior)
@@ -23,16 +23,16 @@ end
 
 Simple container for the time static parameters of a linear Gaussian transition process
 """
-struct LinearGaussianDynamics{AT,bT,QT} <: AbstractDynamics
+struct LinearGaussianDynamics{AT,bT,QT} <: LatentDynamics
     A::AT
     b::bT
     Q::QT
 end
 
-function simulate(
-    rng::AbstractRNG, dynamics::LinearGaussianDynamics, state, ::Integer; kwargs...
+function SSMProblems.distribution(
+    dynamics::LinearGaussianDynamics, ::Integer, state; kwargs...
 )
-    return rand(rng, MvNormal(dynamics.A * state + dynamics.b, dynamics.Q))
+    return MvNormal(dynamics.A * state + dynamics.b, dynamics.Q)
 end
 
 function analytic_predict(dynamics::LinearGaussianDynamics, state)
@@ -44,16 +44,16 @@ end
 
 Simple container for the time static parameters of a linear Gaussian measurement process
 """
-struct LinearGaussianObservation{HT,cT,RT} <: AbstractObservation
+struct LinearGaussianObservation{HT,cT,RT} <: ObservationProcess
     H::HT
     c::cT
     R::RT
 end
 
-function simulate(
-    rng::AbstractRNG, observation::LinearGaussianObservation, state, ::Integer; kwargs...
+function SSMProblems.distribution(
+    observation::LinearGaussianObservation, ::Integer, state; kwargs...
 )
-    return rand(rng, MvNormal(observation.H * state + observation.c, observation.R))
+    return MvNormal(observation.H * state + observation.c, observation.R)
 end
 
 function analytic_update(observation::LinearGaussianObservation, state, data)

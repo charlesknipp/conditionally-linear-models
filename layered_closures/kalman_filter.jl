@@ -1,32 +1,3 @@
-## ABSTRACT STATE SPACE ####################################################################
-
-abstract type AbstractPrior end
-
-function simulate(::AbstractRNG, ::AbstractPrior; kwargs...) end
-
-abstract type AbstractDynamics end
-
-function simulate(::AbstractRNG, ::AbstractDynamics, ::Any, ::Integer; kwargs...) end
-
-abstract type AbstractObservation end
-
-function simulate(::AbstractRNG, ::AbstractObservation, ::Any, ::Integer; kwargs...) end
-
-struct StateSpaceModel{PT<:AbstractPrior,DT<:AbstractDynamics,OT<:AbstractObservation}
-    prior::PT
-    dynamics::DT
-    obseravtion::OT
-end
-
-function simulate(rng::AbstractRNG, model::StateSpaceModel, T::Integer; kwargs...)
-    x0 = simulate(rng, model.prior; kwargs...)
-    xs = fill(simulate(rng, model.dynamics, x0, 1; kwargs...), T)
-    for t in 2:T
-        xs[t] = simulate(rng, model.dynamics, xs[t - 1], t; kwargs...)
-    end
-    return x0, xs, map(t -> simulate(rng, model.obseravtion, xs[t], t; kwargs...), 1:T)
-end
-
 ## KALMAN PREDICT / UPDATE #################################################################
 
 function kalman_predict(μ, Σ, A, b, Q)
@@ -41,16 +12,16 @@ function kalman_update(μ, Σ, H, c, R, y)
     return (μ + K * z, Σ - K * H * Σ), loglikelihood(m, S)
 end
 
-function step(rng::AbstractRNG, model::StateSpaceModel, state, data, iter; kwargs...)
-    pred_state = predict(rng, model.dynamics, state, iter; kwargs...)
-    return update(model.obseravtion, pred_state, data, iter; kwargs...)
+function step(rng::AbstractRNG, model::StateSpaceModel, iter, state, data; kwargs...)
+    pred_state = predict(rng, model.dynamics, iter, state; kwargs...)
+    return update(model.obseravtion, iter, pred_state, data; kwargs...)
 end
 
 function filter(rng::AbstractRNG, model::StateSpaceModel, data; kwargs...)
     init_state = initialize(rng, model.prior; kwargs...)
-    state, ll = step(rng, model, init_state, data[1], 1; kwargs...)
+    state, ll = step(rng, model, 1, init_state, data[1]; kwargs...)
     for t in 2:length(data)
-        state, ll_increment = step(rng, model, state, data[t], t; kwargs...)
+        state, ll_increment = step(rng, model, t, state, data[t]; kwargs...)
         ll += ll_increment
     end
     return ll

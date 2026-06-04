@@ -1,10 +1,11 @@
 using Distributions
+using SSMProblems
 using LinearAlgebra
 using Random
 
 include("layered_closures/kalman_filter.jl")
 include("layered_closures/linear_gaussian.jl")
-include("layered_closures/conditional_procs.jl")
+include("layered_closures/conditional.jl")
 
 ## STOCHASTIC VOLATILITY MODEL #############################################################
 
@@ -55,4 +56,4 @@ end
 testmod = stochastic_volatility_model(0.6)
 
 rng = MersenneTwister(1234)
-x0, xs, ys = simulate(rng, testmod, 100)
+x0, xs, ys = sample(rng, testmod, 100)
