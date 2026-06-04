@@ -1,6 +1,3 @@
-using LinearAlgebra
-using Random
-
 ## ABSTRACT STATE SPACE ####################################################################
 
 abstract type AbstractPrior end
@@ -51,11 +48,12 @@ end
 
 function filter(rng::AbstractRNG, model::StateSpaceModel, data; kwargs...)
     init_state = initialize(rng, model.prior; kwargs...)
-    state = step(rng, model, init_state, data[1], 1; kwargs...)
+    state, ll = step(rng, model, init_state, data[1], 1; kwargs...)
     for t in 2:length(data)
-        state = step(rng, model, state, data[t], t; kwargs...)
+        state, ll_increment = step(rng, model, state, data[t], t; kwargs...)
+        ll += ll_increment
     end
-    return state
+    return ll
 end
 
 ## CUSTOM LOG LIKELIHOOD ###################################################################
