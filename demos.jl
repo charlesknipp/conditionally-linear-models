@@ -49,7 +49,7 @@ function stochastic_volatility_model(γ::T) where {T<:Real}
     return StateSpaceModel(
         ConditionalPrior(GaussianPrior(zeros(T, 2), T(10) * I(2)), conditional_prior(γ)),
         ConditionalDynamics(random_walk(γ), conditional_dynamics(γ)),
-        ConditionalObservation(conditional_observation(γ))
+        ConditionalObservation(conditional_observation(γ)),
     )
 end
 

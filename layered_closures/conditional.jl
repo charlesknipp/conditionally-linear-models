@@ -47,7 +47,9 @@ function SSMProblems.simulate(
     rng::AbstractRNG, dynamics::ConditionalDynamics, iter::Integer, state; kwargs...
 )
     x = SSMProblems.simulate(rng, dynamics.outer_process, iter, state.x; kwargs...)
-    z = SSMProblems.simulate(rng, dynamics.inner_process(x; kwargs...), iter, state.z; kwargs...)
+    z = SSMProblems.simulate(
+        rng, dynamics.inner_process(x; kwargs...), iter, state.z; kwargs...
+    )
     return (; x, z)
 end
 
@@ -58,7 +60,11 @@ function SSMProblems.logdensity(
         dynamics.outer_process, iter, prev_state.x, new_state.x; kwargs...
     )
     inner_logprob = SSMProblems.logdensity(
-        observation.inner_process(prev_state.x; kwargs...), iter, prev_state.z, new_state.z; kwargs...
+        observation.inner_process(prev_state.x; kwargs...),
+        iter,
+        prev_state.z,
+        new_state.z;
+        kwargs...,
     )
     return outer_logprob + inner_logprob
 end

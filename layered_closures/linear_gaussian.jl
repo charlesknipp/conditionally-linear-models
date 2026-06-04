@@ -35,9 +35,7 @@ function SSMProblems.distribution(
     return MvNormal(dynamics.A * state + dynamics.b, dynamics.Q)
 end
 
-function analytic_predict(
-    dynamics::LinearGaussianDynamics, iter::Integer, state; kwargs...
-)
+function analytic_predict(dynamics::LinearGaussianDynamics, iter::Integer, state; kwargs...)
     return kalman_predict(state[1], state[2], dynamics.A, dynamics.b, dynamics.Q)
 end
 
