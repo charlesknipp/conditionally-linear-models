@@ -8,12 +8,9 @@ include("layered_closures/conditional_procs.jl")
 
 ## STOCHASTIC VOLATILITY MODEL #############################################################
 
-struct RandomWalk{T} <: AbstractDynamics
-    γ::T
-end
-
-function simulate(rng::AbstractRNG, dynamics::RandomWalk, state, ::Integer; kwargs...)
-    return state + dynamics.γ .* randn(rng, 2)
+# the volatility process is linear in the log space
+function random_walk(γ::T) where {T<:Real}
+    return LinearGaussianDynamics(I(2), zeros(T, 2), γ * I(2))
 end
 
 # this is just for consistency among definitions
@@ -50,7 +47,7 @@ end
 function stochastic_volatility_model(γ::T) where {T<:Real}
     return StateSpaceModel(
         ConditionalPrior(GaussianPrior(zeros(T, 2), T(10) * I(2)), conditional_prior(γ)),
-        ConditionalDynamics(RandomWalk(γ), conditional_dynamics(γ)),
+        ConditionalDynamics(random_walk(γ), conditional_dynamics(γ)),
         ConditionalObservation(conditional_observation(γ))
     )
 end
