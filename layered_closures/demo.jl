@@ -1,11 +1,12 @@
 using Distributions
 using SSMProblems
 using LinearAlgebra
+using Printf
 using Random
 
-include("layered_closures/kalman_filter.jl")
-include("layered_closures/linear_gaussian.jl")
-include("layered_closures/conditional.jl")
+include("kalman_filter.jl")
+include("linear_gaussian.jl")
+include("conditional.jl")
 
 ## STOCHASTIC VOLATILITY MODEL #############################################################
 
@@ -53,7 +54,21 @@ function stochastic_volatility_model(γ::T) where {T<:Real}
     )
 end
 
-testmod = stochastic_volatility_model(0.6)
+## DRIVER ##################################################################################
 
-rng = MersenneTwister(1234)
-x0, xs, ys = sample(rng, testmod, 100)
+function main()
+    svmod = stochastic_volatility_model(0.6)
+    rng = MersenneTwister(1234)
+    T = 30
+
+    x0, xs, ys = sample(rng, svmod, T)
+    states, ll = filter(rng, svmod, ys)
+
+    println("── Filtering (conditioned on fixed outer trajectory) ──")
+    @printf("  steps               : %d\n", T)
+    @printf("  final filtered mean : [% .4f]\n", states[end].z[1]...)
+    @printf("  final filtered std  : [% .4f]\n", sqrt.(diag(states[end].z[2]))...)
+    @printf("  log-likelihood      : % .6f\n", ll)
+end
+
+main()
