@@ -9,7 +9,7 @@ function kalman_update(μ, Σ, H, c, R, y)
     z = y - m
     S = H * Σ * H' + R
     K = Σ * H' / S
-    return (μ + K * z, Σ - K * H * Σ), loglikelihood(m, S)
+    return (μ + K * z, Σ - K * H * Σ), loglikelihood(z, S)
 end
 
 function step(rng::AbstractRNG, model::StateSpaceModel, iter, state, data; kwargs...)
@@ -46,5 +46,5 @@ function invquad(x, cholA)
 end
 
 function loglikelihood(μ, Σ)
-    return -(length(μ) + log2π + logdet(Σ) + dot(μ, inv(Σ) * μ)) / 2
+    return -(length(μ) * log2π + logdet(Σ) + dot(μ, inv(Σ) * μ)) / 2
 end
