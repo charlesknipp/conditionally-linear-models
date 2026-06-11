@@ -1,6 +1,5 @@
-using SparseConnectivityTracer: TracerSparsityDetector, jacobian_sparsity
+using SparseConnectivityTracer: TracerLocalSparsityDetector, jacobian_sparsity
 using StaticArrays: StaticArray, similar_type
-using SparseConnectivityTracer
 
 ## PARAMETER TRACKING ######################################################################
 
