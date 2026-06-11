@@ -1,12 +1,19 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Demo: a Rao-Blackwellised model defined with closures, filtered and
 # differentiated w.r.t. θ conditioned on a fixed outer trajectory.
+#
+# Activity (which atom fields depend on the free entries of θ) is detected
+# automatically by `probe_activity` — no manual `Inactive` annotations — and
+# adapts to which entries of θ are held fixed:
+#   Case 1: ∇ w.r.t. all of θ → b, H, c inactive (θ-independent)
+#   Case 2: ∇ w.r.t. θ[2:3]   → A also inactive (depends on θ only via θ[1])
 # ─────────────────────────────────────────────────────────────────────────────
 
 using StaticArrays, LinearAlgebra, Random, Printf
 import Mooncake as MC
 
 include("framework.jl")
+include("activity.jl")
 include("gradient_analytic.jl")
 include("gradient_mooncake.jl")
 
@@ -31,10 +38,10 @@ function make_model(θ)
         s = a * x                                  # shared precompute (θ + outer)
         A = exp(s) * @SMatrix [0.5 0.05; 0.0 0.5]  # time-varying parametric (shares s)
         b = x * @SVector [1.0, 0.0]                # time-varying non-parametric
-        return LinearGaussianDynamics(A, Inactive(b), Q)
+        return LinearGaussianDynamics(A, b, Q)
     end
     function obs_fn(x)
-        return LinearGaussianObservation(Inactive(H), Inactive(c), R)
+        return LinearGaussianObservation(H, c, R)
     end
 
     return StateSpaceModel(
@@ -83,6 +90,30 @@ function central_diff(f, x; h=1e-6)
     return g
 end
 
+## REPORTING ##################################################################
+
+const ATOM_FIELDS = (:A, :b, :Q, :H, :c, :R)
+
+function report_case(title, flags, θfree, g_mc, g_fd)
+    acts = (flags.dyn..., flags.obs...)
+    fmt(v) = join((@sprintf("% .6f", vi) for vi in v), ", ")
+    namelist(pred) = join((f for (f, a) in zip(ATOM_FIELDS, acts) if pred(a)), ", ")
+    println("\n── ", title, " ──")
+    @printf(
+        "  free θ values            : [%s]\n",
+        join((@sprintf("% .3f", t) for t in θfree), ", ")
+    )
+    @printf("  probed active fields     : %s\n", namelist(identity))
+    @printf("  probed inactive fields   : %s\n", namelist(!))
+    @printf("  ∇ (Mooncake)             : [%s]\n", fmt(g_mc))
+    @printf("  ∇ (finite differences)   : [%s]\n", fmt(g_fd))
+    @printf("  max |Mooncake - FD|      : %.2e\n", maximum(abs, g_mc .- g_fd))
+    println("  field pullbacks in one reverse pass:")
+    for f in ATOM_FIELDS
+        @printf("    %-2s : %2d\n", f, get(PULLBACK_COUNT, f, 0))
+    end
+end
+
 ## DRIVER #####################################################################
 
 function main()
@@ -101,22 +132,31 @@ function main()
     @printf("  final filtered std  : [% .4f, % .4f]\n", sqrt.(diag(states[end].Σ))...)
     @printf("  log-likelihood      : % .6f\n", ll)
 
-    # 2. θ-derivatives at a different θ — Mooncake reverse pass vs finite differences.
     θ0 = [0.3, -0.5, -1.0]
-    logL(θ) = inner_loglik(make_model(θ), outer, ys, kalman_step_analytic)
-    g_fd = central_diff(logL, θ0)
-    g_mooncake = mooncake_gradient(logL, θ0)
 
-    println("\n── θ-derivative of the conditional log-likelihood ──")
-    @printf("  θ                       : [% .3f, % .3f, % .3f]\n", θ0...)
-    @printf("  ∇θ (Mooncake)           : [% .6f, % .6f, % .6f]\n", g_mooncake...)
-    @printf("  ∇θ (finite differences) : [% .6f, % .6f, % .6f]\n", g_fd...)
-    @printf("  max |Mooncake - finite Δ|: %.2e\n", maximum(abs, g_mooncake .- g_fd))
-    println("\n── Individual model-field pullbacks used ──")
-    for field in (:A, :b, :Q, :H, :c, :R)
-        @printf("  %-2s : %d\n", field, get(PULLBACK_COUNT, field, 0))
+    # Case 1: differentiate w.r.t. all of θ
+    flags = probe_activity(make_model, θ0, outer[1])
+    logL = let vf = Val(flags)
+        θ -> inner_loglik(with_activity(make_model(θ), vf), outer, ys, kalman_step_analytic)
     end
-    println("  (`Inactive` fields are omitted by the analytical reverse rule.)")
+    g_mc = mooncake_gradient(logL, θ0)
+    report_case("Case 1: ∇ w.r.t. all of θ", flags, θ0, g_mc, central_diff(logL, θ0))
+
+    # Case 2: hold a = θ[1] fixed, differentiate w.r.t. θ[2:3] only
+    flags23 = probe_activity(make_model, θ0, outer[1]; free=2:3)
+    θ23 = θ0[2:3]
+    logL23 = let vf = Val(flags23), a = θ0[1]
+        θ -> inner_loglik(
+            with_activity(make_model(vcat(a, θ)), vf),
+            outer,
+            ys,
+            kalman_step_analytic,
+        )
+    end
+    g23_mc = mooncake_gradient(logL23, θ23)
+    return report_case(
+        "Case 2: ∇ w.r.t. θ[2:3] (a fixed)", flags23, θ23, g23_mc, central_diff(logL23, θ23)
+    )
 end
 
 main()

@@ -47,8 +47,15 @@ end
 function LinearGaussianDynamics(A, b, Q)
     values = (_unwrap(A), _unwrap(b), _unwrap(Q))
     return LinearGaussianDynamics{
-        typeof(values[1]),typeof(values[2]),typeof(values[3]),_active(A),_active(b),_active(Q)
-    }(values...)
+        typeof(values[1]),
+        typeof(values[2]),
+        typeof(values[3]),
+        _active(A),
+        _active(b),
+        _active(Q),
+    }(
+        values...
+    )
 end
 
 struct LinearGaussianObservation{TH,Tc,TR,AH,Ac,AR}
@@ -60,8 +67,15 @@ end
 function LinearGaussianObservation(H, c, R)
     values = (_unwrap(H), _unwrap(c), _unwrap(R))
     return LinearGaussianObservation{
-        typeof(values[1]),typeof(values[2]),typeof(values[3]),_active(H),_active(c),_active(R)
-    }(values...)
+        typeof(values[1]),
+        typeof(values[2]),
+        typeof(values[3]),
+        _active(H),
+        _active(c),
+        _active(R),
+    }(
+        values...
+    )
 end
 
 struct GaussianPrior{Tμ,TΣ}
@@ -87,6 +101,47 @@ struct StateSpaceModel{P,D,O}
     prior::P
     dyn::D
     obs::O
+end
+
+## ACTIVITY STAMPING ###########################################################
+# `with_activity` composes each conditional closure with `_reflag`, which
+# re-stamps the activity type parameters of the atom it builds. This lets
+# probed flags (see `probe_activity` in activity.jl) drive the pullback
+# skipping in the analytical reverse rule without manual `Inactive`
+# annotations and without changing any call site: the wrapped closure still
+# sits in the `inner` field.
+
+"Callable composing an atom-building closure with an activity re-stamp."
+struct Reflagged{F,flags}
+    f::F
+end
+(r::Reflagged{F,flags})(x) where {F,flags} = _reflag(r.f(x), Val(flags))
+
+function _reflag(d::LinearGaussianDynamics, ::Val{flags}) where {flags}
+    return LinearGaussianDynamics{typeof(d.A),typeof(d.b),typeof(d.Q),flags...}(
+        d.A, d.b, d.Q
+    )
+end
+function _reflag(o::LinearGaussianObservation, ::Val{flags}) where {flags}
+    return LinearGaussianObservation{typeof(o.H),typeof(o.c),typeof(o.R),flags...}(
+        o.H, o.c, o.R
+    )
+end
+
+"""
+    with_activity(model, ::Val{flags})
+
+Stamp probed activity flags (`(dyn=..., obs=...)`, see `probe_activity`) into
+the atoms built by the model's conditional closures. `flags` must be a
+type-domain constant (`Val` built outside the differentiated region) so the
+stamped model is type-stable.
+"""
+function with_activity(m::StateSpaceModel, ::Val{flags}) where {flags}
+    return StateSpaceModel(
+        m.prior,
+        ConditionalDynamics(Reflagged{typeof(m.dyn.inner),flags.dyn}(m.dyn.inner)),
+        ConditionalObservation(Reflagged{typeof(m.obs.inner),flags.obs}(m.obs.inner)),
+    )
 end
 
 ## KALMAN FORWARD #############################################################
