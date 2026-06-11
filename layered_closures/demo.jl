@@ -1,6 +1,7 @@
 using Distributions
 using SSMProblems
 using LinearAlgebra
+using PDMats
 using Printf
 using Random
 using StaticArrays
@@ -8,6 +9,32 @@ using StaticArrays
 include("kalman_filter.jl")
 include("linear_gaussian.jl")
 include("conditional.jl")
+
+## STATIC ARRAY SUPPORT ####################################################################
+
+# I just ripped these from LowLevelParticleFilters, likely unnecessary
+@inline PDMats.invquad(a::PDMats.ScalMat, x::StaticVector) = dot(x, x) / a.value
+@inline PDMats.invquad(a::PDMats.PDMat, x::StaticVector) = dot(x, a \ x)
+@inline Base.:(\)(a::PDMats.PDMat, x::StaticVector) = a.chol \ x
+@inline PDMats.invquad(a::PDMats.PDiagMat, x::StaticVector) = PDMats.wsumsq(1 ./ a.diag, x)
+
+@inline Distributions.sqmahal(d::MvNormal, x::StaticArray) =
+    Distributions.invquad(d.Σ, x - d.μ)
+
+const StaticMvNormal{N,T} =
+    MvNormal{T,PDMat{T,MT},VT} where {N,T,MT<:StaticMatrix{N,N,T},VT<:StaticVector{N,T}}
+
+# this doest the dimension check with the type parameters
+function PDMats.unwhiten(
+    a::PDMat{T,AT}, x::SVector{N,T}
+) where {T<:Real,N,AT<:StaticMatrix{N,N,T}}
+    return PDMats.chol_lower(cholesky(a)) * x
+end
+
+# this should singlehandedly fix sampling from Static MvNormal
+function Random.rand(rng::AbstractRNG, d::StaticMvNormal{N,T}) where {N,T<:Real}
+    return d.μ + PDMats.unwhiten(d.Σ, SVector{N,T}(randn(rng, N)))
+end
 
 ## STOCHASTIC VOLATILITY MODEL #############################################################
 
@@ -66,7 +93,6 @@ function linear_dynamics(a::AT, logσ::ΣT) where {AT<:Real,ΣT<:Real}
     Q = exp(logσ) * @SMatrix [1.0 0.0; 0.0 1.0]
     function inner_process(iter; controls, kwargs...)
         s = a * controls[iter]
-        # A = exp(s) * SMatrix{2,2}(0.5, 0.05, 0.0, 0.5)
         A = exp(s) * @SMatrix [0.5 0.05; 0.0 0.5]
         b = controls[iter] * @SVector [1.0, 0.0]
         return LinearGaussianDynamics(A, b, Q)
@@ -93,22 +119,23 @@ end
 
 ## DRIVER ##################################################################################
 
-print_gaussian_state(state::NamedTuple{(:x,:z)}) = print_gaussian_state(state.z)
+print_gaussian_state(state::NamedTuple{(:x, :z)}) = print_gaussian_state(state.z)
 
 function print_gaussian_state(state)
     format = join(fill("% .4f", length(state[1])), ", ")
     myprintf("  final filtered mean : [$format]\n", state[1]...)
-    myprintf("  final filtered std  : [$format]\n", sqrt.(diag(state[2]))...)
+    return myprintf("  final filtered std  : [$format]\n", sqrt.(diag(state[2]))...)
 end
 
 myprintf(text::String, args...) = Printf.format(stdout, Printf.Format(text), args...)
 
 function main(rng::AbstractRNG, T::Integer, model::AbstractStateSpaceModel; kwargs...)
-    x0, xs, ys = sample(rng, model, T; kwargs...)
+    _, _, ys = sample(rng, model, T; kwargs...)
     states, ll = filter(rng, model, ys; kwargs...)
 
     println("── Filtering (conditioned on fixed outer trajectory) ──")
     @printf("  steps               : %d\n", T)
+    @printf("  state type          : %s\n", typeof(states[end]))
     print_gaussian_state(states[end])
     @printf("  log-likelihood      : % .6f\n", ll)
 end
