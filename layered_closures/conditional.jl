@@ -27,7 +27,7 @@ end
 # end
 
 function initialize(rng::AbstractRNG, prior::ConditionalPrior; kwargs...)
-    x = simulate(rng, prior.outer_process; kwargs...)
+    x = SSMProblems.simulate(rng, prior.outer_process; kwargs...)
     z = analytic_initialize(prior.inner_process(x; kwargs...); kwargs...)
     return (; x, z)
 end
@@ -69,7 +69,7 @@ function SSMProblems.logdensity(
     return outer_logprob + inner_logprob
 end
 
-function predict(rng::AbstractRNG, dynamics::ConditionalDynamics, state, iter; kwargs...)
+function predict(rng::AbstractRNG, dynamics::ConditionalDynamics, iter, state; kwargs...)
     x = SSMProblems.simulate(rng, dynamics.outer_process, iter, state.x; kwargs...)
     z = analytic_predict(dynamics.inner_process(x; kwargs...), iter, state.z; kwargs...)
     return (; x, z)
@@ -100,9 +100,9 @@ function SSMProblems.logdensity(
     )
 end
 
-function update(observation::ConditionalObservation, state, data, iter; kwargs...)
-    z = analytic_update(
+function update(observation::ConditionalObservation, iter, state, data; kwargs...)
+    z, log_likelihood = analytic_update(
         observation.inner_process(state.x; kwargs...), iter, state.z, data; kwargs...
     )
-    return (; x=state.x, z)
+    return (; x=state.x, z), log_likelihood
 end
