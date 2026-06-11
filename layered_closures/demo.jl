@@ -30,7 +30,7 @@ end
 function conditional_dynamics(::T) where {T<:Real}
     A = ones(SMatrix{1,1,T})
     b = zeros(SVector{1,T})
-    function inner_process(state; kwargs...)
+    function inner_process(state, iter; kwargs...)
         Q = SMatrix{1,1,T}(exp(state[1]))
         return LinearGaussianDynamics(A, b, Q)
     end
@@ -41,7 +41,7 @@ end
 function conditional_observation(::T) where {T<:Real}
     H = ones(SMatrix{1,1,T})
     c = zeros(SVector{1,T})
-    function inner_process(state; kwargs...)
+    function inner_process(state, iter; kwargs...)
         R = SMatrix{1,1,T}(exp(state[2]))
         return LinearGaussianObservation(H, c, R)
     end
@@ -59,21 +59,63 @@ function stochastic_volatility_model(γ::T) where {T<:Real}
     )
 end
 
+## CONTROLLED LINEAR GAUSSIAN CASE #########################################################
+
+# I haven't thought through the linear Gaussian model with controls yet...
+function linear_dynamics(a::AT, logσ::ΣT) where {AT<:Real,ΣT<:Real}
+    Q = exp(logσ) * @SMatrix [1.0 0.0; 0.0 1.0]
+    function inner_process(iter; controls, kwargs...)
+        s = a * controls[iter]
+        # A = exp(s) * SMatrix{2,2}(0.5, 0.05, 0.0, 0.5)
+        A = exp(s) * @SMatrix [0.5 0.05; 0.0 0.5]
+        b = controls[iter] * @SVector [1.0, 0.0]
+        return LinearGaussianDynamics(A, b, Q)
+    end
+    return inner_process
+end
+
+# no closure necessary here
+function linear_observation(logσ::ΣT) where {ΣT<:Real}
+    H = @SMatrix [1.0 0.0]
+    c = @SVector [0.0]
+    R = exp(logσ) * SMatrix{1,1}(1.0)
+    return LinearGaussianObservation(H, c, R)
+end
+
+# generate the whole model
+function control_model(θ)
+    return StateSpaceModel(
+        GaussianPrior((@SVector [0.0, 0.0]), (@SMatrix [1.0 0.0; 0.0 1.0])),
+        ControlledDynamics(linear_dynamics(θ[1], θ[2])),
+        linear_observation(θ[3]),
+    )
+end
+
 ## DRIVER ##################################################################################
 
-function main()
-    svmod = stochastic_volatility_model(0.6)
-    rng = MersenneTwister(1234)
-    T = 30
+print_gaussian_state(state::NamedTuple{(:x,:z)}) = print_gaussian_state(state.z)
 
-    x0, xs, ys = sample(rng, svmod, T)
-    states, ll = filter(rng, svmod, ys)
+function print_gaussian_state(state)
+    format = join(fill("% .4f", length(state[1])), ", ")
+    myprintf("  final filtered mean : [$format]\n", state[1]...)
+    myprintf("  final filtered std  : [$format]\n", sqrt.(diag(state[2]))...)
+end
+
+myprintf(text::String, args...) = Printf.format(stdout, Printf.Format(text), args...)
+
+function main(rng::AbstractRNG, T::Integer, model::AbstractStateSpaceModel; kwargs...)
+    x0, xs, ys = sample(rng, model, T; kwargs...)
+    states, ll = filter(rng, model, ys; kwargs...)
 
     println("── Filtering (conditioned on fixed outer trajectory) ──")
     @printf("  steps               : %d\n", T)
-    @printf("  final filtered mean : [% .4f]\n", states[end].z[1]...)
-    @printf("  final filtered std  : [% .4f]\n", sqrt.(diag(states[end].z[2]))...)
+    print_gaussian_state(states[end])
     @printf("  log-likelihood      : % .6f\n", ll)
 end
 
-main()
+# stochastic volatility model (bad example)
+main(MersenneTwister(1234), 30, stochastic_volatility_model(0.6))
+
+# Tim's model (good example)
+controls = [sin(0.3t) for t in 1:30]
+main(MersenneTwister(20240608), 30, control_model([0.5, -1.0, -1.5]); controls)

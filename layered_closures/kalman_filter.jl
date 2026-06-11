@@ -12,6 +12,22 @@ function kalman_update(μ, Σ, H, c, R, y)
     return (μ + K * z, Σ - K * H * Σ), loglikelihood(z, S)
 end
 
+function initialize(rng::AbstractRNG, prior::StatePrior; kwargs...)
+    return analytic_initialize(prior; kwargs...)
+end
+
+function predict(
+    rng::AbstractRNG, dynamics::LatentDynamics, iter::Integer, state; kwargs...
+)
+    return analytic_predict(dynamics, iter, state; kwargs...)
+end
+
+function update(
+    observation::ObservationProcess, iter::Integer, state, data; kwargs...
+)
+    return analytic_update(observation, iter, state, data)
+end
+
 function step(rng::AbstractRNG, model::StateSpaceModel, iter, state, data; kwargs...)
     pred_state = predict(rng, model.dyn, iter, state; kwargs...)
     return update(model.obs, iter, pred_state, data; kwargs...)
