@@ -47,18 +47,6 @@ end
 
 const log2π = log(2π)
 
-function get_chol(A::AbstractArray)
-    cholA = 0.5 .* (A .+ transpose(A))
-    info = LAPACK.potrf!('U', cholA)
-    return cholA, info
-end
-
-function invquad(x, cholA)
-    out = deepcopy(x)
-    LAPACK.potrs!('U', cholA, out)
-    return out
-end
-
 function loglikelihood(μ, Σ)
     return -(length(μ) * log2π + logdet(Σ) + dot(μ, inv(Σ) * μ)) / 2
 end
