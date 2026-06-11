@@ -66,15 +66,18 @@ randn_svec(rng, ::Val{D}) where {D} = SVector{D}(ntuple(_ -> randn(rng), D))
 function simulate(rng, model, outer)
     p = model.prior.inner(outer[1])
     z = p.μ + cholesky(p.Σ).L * randn_svec(rng, Val(length(p.μ)))
-    ys = SVector{1,Float64}[]
+
+    zs = Vector{typeof(z)}(undef, length(outer))
     for t in eachindex(outer)
         d = model.dyn.inner(outer[t])
         z = d.A * z + d.b + cholesky(d.Q).L * randn_svec(rng, Val(length(z)))
-        o = model.obs.inner(outer[t])
-        y = o.H * z + o.c + cholesky(o.R).L * randn_svec(rng, Val(length(o.c)))
-        push!(ys, y)
+        zs[t] = z
     end
-    return ys
+
+    return map(eachindex(outer)) do t
+        o = model.obs.inner(outer[t])
+        o.H * zs[t] + o.c + cholesky(o.R).L * randn_svec(rng, Val(length(o.c)))
+    end
 end
 
 ## FINITE-DIFFERENCE GRADIENT (reference) #####################################
@@ -160,3 +163,9 @@ function main()
 end
 
 main()
+
+# ── Filtering (conditioned on fixed outer trajectory) ──
+#   steps               : 30
+#   final filtered mean : [ 1.1881, -0.1142]
+#   final filtered std  : [ 0.3831,  0.8199]
+#   log-likelihood      : -39.315015
