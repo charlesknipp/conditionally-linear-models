@@ -9,6 +9,7 @@ using StaticArrays
 include("kalman_filter.jl")
 include("linear_gaussian.jl")
 include("conditional.jl")
+include("activity_tracer.jl")
 
 ## STATIC ARRAY SUPPORT ####################################################################
 
@@ -24,7 +25,6 @@ include("conditional.jl")
 const StaticMvNormal{N,T} =
     MvNormal{T,PDMat{T,MT},VT} where {N,T,MT<:StaticMatrix{N,N,T},VT<:StaticVector{N,T}}
 
-# this doest the dimension check with the type parameters
 function PDMats.unwhiten(
     a::PDMat{T,AT}, x::SVector{N,T}
 ) where {T<:Real,N,AT<:StaticMatrix{N,N,T}}
@@ -140,9 +140,11 @@ function main(rng::AbstractRNG, T::Integer, model::AbstractStateSpaceModel; kwar
     @printf("  log-likelihood      : % .6f\n", ll)
 end
 
-# stochastic volatility model (bad example)
+# stochastic volatility model (activity probe breaks)
 main(MersenneTwister(1234), 30, stochastic_volatility_model(0.6))
+probe_activity(x -> stochastic_volatility_model(x[1]), [0.6])
 
-# Tim's model (good example)
+# Tim's model (activity probe works wonderfully)
 controls = [sin(0.3t) for t in 1:30]
 main(MersenneTwister(20240608), 30, control_model([0.5, -1.0, -1.5]); controls)
+probe_activity(control_model, [0.3, -0.5, -1.0]; controls)
