@@ -1,5 +1,6 @@
 using SparseConnectivityTracer: TracerSparsityDetector, jacobian_sparsity
 using StaticArrays: StaticArray, similar_type
+using SparseConnectivityTracer
 
 ## PARAMETER TRACKING ######################################################################
 
@@ -30,8 +31,7 @@ end
 ## TRACER ##################################################################################
 
 function probe_activity(build, θ_free, process::Symbol; kwargs...)
-    # init_state = initialize(Random.default_rng(), build(θ_free).prior; kwargs...)
-    J = jacobian_sparsity(θ_free, TracerSparsityDetector()) do θ
+    J = jacobian_sparsity(θ_free, TracerLocalSparsityDetector()) do θ
         model = build(θ)
         state = initialize(Random.default_rng(), model.prior; kwargs...)
         return parameter_sparsity(getproperty(model, process), state; kwargs...)
@@ -44,7 +44,24 @@ end
 
 Trace which atom fields depend on the free parameters, evaluating the conditional closures
 at the representative outer state chosen by initializing a filter. Models with exogenous
-elements evaluated in the forward pass must include said controls in the kwargs.
+elements evaluated in the forward pass must include said controls in the kwargs.c
+
+NOTE: this only works for models whos regime always results in consistent parameterization.
+For example, the following conditionally linear Gaussian transition does not guarantee a
+proper trace for θ.
+
+```julia
+function untraceable_dynamics(θ; kwargs...)
+    A = [1.0;;]
+    b = [0.0;;]
+    function inner_process(state, iter; kwargs...)
+        Q = cond(state) ? [θ;;] : [1.0;;]
+        return LinearGaussianDynamics(A, b, Q)
+    end
+    return inner_process
+end
+```
+
 """
 function probe_activity(build, θ_free; kwargs...)
     return (

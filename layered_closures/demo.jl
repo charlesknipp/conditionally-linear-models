@@ -140,11 +140,11 @@ function main(rng::AbstractRNG, T::Integer, model::AbstractStateSpaceModel; kwar
     @printf("  log-likelihood      : % .6f\n", ll)
 end
 
-# stochastic volatility model (activity probe breaks)
+# stochastic volatility model
 main(MersenneTwister(1234), 30, stochastic_volatility_model(0.6))
 probe_activity(x -> stochastic_volatility_model(x[1]), [0.6])
 
-# Tim's model (activity probe works wonderfully)
+# Tim's model
 controls = [sin(0.3t) for t in 1:30]
 main(MersenneTwister(20240608), 30, control_model([0.5, -1.0, -1.5]); controls)
 probe_activity(control_model, [0.3, -0.5, -1.0]; controls)
