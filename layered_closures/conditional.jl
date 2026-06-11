@@ -138,11 +138,7 @@ function SSMProblems.logdensity(
     dynamics::ControlledDynamics, iter::Integer, prev_state, new_state; kwargs...
 )
     return SSMProblems.logdensity(
-        observation.process(iter; kwargs...),
-        iter,
-        prev_state,
-        new_state;
-        kwargs...,
+        observation.process(iter; kwargs...), iter, prev_state, new_state; kwargs...
     )
 end
 

@@ -22,9 +22,7 @@ function predict(
     return analytic_predict(dynamics, iter, state; kwargs...)
 end
 
-function update(
-    observation::ObservationProcess, iter::Integer, state, data; kwargs...
-)
+function update(observation::ObservationProcess, iter::Integer, state, data; kwargs...)
     return analytic_update(observation, iter, state, data)
 end
 
