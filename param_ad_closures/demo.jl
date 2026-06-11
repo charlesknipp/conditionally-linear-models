@@ -163,9 +163,3 @@ function main()
 end
 
 main()
-
-# ── Filtering (conditioned on fixed outer trajectory) ──
-#   steps               : 30
-#   final filtered mean : [ 1.1881, -0.1142]
-#   final filtered std  : [ 0.3831,  0.8199]
-#   log-likelihood      : -39.315015
