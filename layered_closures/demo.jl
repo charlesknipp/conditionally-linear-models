@@ -13,15 +13,6 @@ include("activity_tracer.jl")
 
 ## STATIC ARRAY SUPPORT ####################################################################
 
-# I just ripped these from LowLevelParticleFilters, likely unnecessary
-@inline PDMats.invquad(a::PDMats.ScalMat, x::StaticVector) = dot(x, x) / a.value
-@inline PDMats.invquad(a::PDMats.PDMat, x::StaticVector) = dot(x, a \ x)
-@inline Base.:(\)(a::PDMats.PDMat, x::StaticVector) = a.chol \ x
-@inline PDMats.invquad(a::PDMats.PDiagMat, x::StaticVector) = PDMats.wsumsq(1 ./ a.diag, x)
-
-@inline Distributions.sqmahal(d::MvNormal, x::StaticArray) =
-    Distributions.invquad(d.Σ, x - d.μ)
-
 const StaticMvNormal{N,T} =
     MvNormal{T,PDMat{T,MT},VT} where {N,T,MT<:StaticMatrix{N,N,T},VT<:StaticVector{N,T}}
 
