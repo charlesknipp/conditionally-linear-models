@@ -2,9 +2,10 @@
 # Demo: a Rao-Blackwellised model defined with closures, filtered and
 # differentiated w.r.t. θ conditioned on a fixed outer trajectory.
 #
-# Activity (which atom fields depend on the free entries of θ) is detected
-# automatically by `probe_activity` — no manual `Inactive` annotations — and
-# adapts to which entries of θ are held fixed:
+# Activity (which atom fields depend on the free parameters) is detected
+# automatically by `probe_activity` — no manual `Inactive` annotations. The
+# probe receives the same `θ_free -> model` builder that is differentiated,
+# so the embedding of free parameters is defined in exactly one place:
 #   Case 1: ∇ w.r.t. all of θ → b, H, c inactive (θ-independent)
 #   Case 2: ∇ w.r.t. θ[2:3]   → A also inactive (depends on θ only via θ[1])
 # ─────────────────────────────────────────────────────────────────────────────
@@ -142,16 +143,15 @@ function main()
     g_mc = mooncake_gradient(logL, θ0)
     report_case("Case 1: ∇ w.r.t. all of θ", flags, θ0, g_mc, central_diff(logL, θ0))
 
-    # Case 2: hold a = θ[1] fixed, differentiate w.r.t. θ[2:3] only
-    flags23 = probe_activity(make_model, θ0, outer[1]; free=2:3)
+    # Case 2: hold a = θ[1] fixed, differentiate w.r.t. θ[2:3] only. The
+    # embedding lives in `build23`, which both the probe and the objective use.
     θ23 = θ0[2:3]
-    logL23 = let vf = Val(flags23), a = θ0[1]
-        θ -> inner_loglik(
-            with_activity(make_model(vcat(a, θ)), vf),
-            outer,
-            ys,
-            kalman_step_analytic,
-        )
+    build23 = let a = θ0[1]
+        θ -> make_model(vcat(a, θ))
+    end
+    flags23 = probe_activity(build23, θ23, outer[1])
+    logL23 = let vf = Val(flags23), build = build23
+        θ -> inner_loglik(with_activity(build(θ), vf), outer, ys, kalman_step_analytic)
     end
     g23_mc = mooncake_gradient(logL23, θ23)
     return report_case(
