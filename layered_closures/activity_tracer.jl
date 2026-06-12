@@ -4,11 +4,13 @@ using StaticArrays: StaticArray, similar_type
 ## PARAMETER TRACKING ######################################################################
 
 function parameter_sparsity(dynamics::LinearGaussianDynamics, state; kwargs...)
-    return [sum(dynamics.A), sum(dynamics.b), sum(dynamics.Q)]
+    A, b, Q = fetch_parameters(dynamics, 1; kwargs...)
+    return [sum(A), sum(b), sum(Q)]
 end
 
 function parameter_sparsity(observation::LinearGaussianObservation, state; kwargs...)
-    return [sum(observation.H), sum(observation.c), sum(observation.R)]
+    H, c, R = fetch_parameters(observation, 1; kwargs...)
+    return [sum(H), sum(c), sum(R)]
 end
 
 function parameter_sparsity(dynamics::ConditionalDynamics, state; kwargs...)
@@ -21,10 +23,6 @@ function parameter_sparsity(observation::ConditionalObservation, state; kwargs..
     return parameter_sparsity(
         observation.inner_process(state.x, 1; kwargs...), state.z; kwargs...
     )
-end
-
-function parameter_sparsity(dynamics::ControlledDynamics, state; kwargs...)
-    return parameter_sparsity(dynamics.process(1; kwargs...), state; kwargs...)
 end
 
 ## TRACER ##################################################################################

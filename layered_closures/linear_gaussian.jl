@@ -1,3 +1,8 @@
+## UTILITIES ###############################################################################
+
+compute_parameter(param::AbstractArray, args...; kwargs...) = param
+compute_parameter(param::Function, args...; kwargs...) = param(args...; kwargs...)
+
 ## LINEAR GAUSSIAN PROCESSES ###############################################################
 
 """
@@ -29,14 +34,24 @@ struct LinearGaussianDynamics{AT,bT,QT} <: LatentDynamics
     Q::QT
 end
 
+function fetch_parameters(dynamics::LinearGaussianDynamics, iter::Integer; kwargs...)
+    return (
+        compute_parameter(dynamics.A, iter; kwargs...),
+        compute_parameter(dynamics.b, iter; kwargs...),
+        compute_parameter(dynamics.Q, iter; kwargs...)
+    )
+end
+
 function SSMProblems.distribution(
-    dynamics::LinearGaussianDynamics, ::Integer, state; kwargs...
+    dynamics::LinearGaussianDynamics, iter::Integer, state; kwargs...
 )
-    return MvNormal(dynamics.A * state + dynamics.b, dynamics.Q)
+    A, b, Q = fetch_parameters(dynamics, iter; kwargs...)
+    return MvNormal(A * state + b, Q)
 end
 
 function analytic_predict(dynamics::LinearGaussianDynamics, iter::Integer, state; kwargs...)
-    return kalman_predict(state[1], state[2], dynamics.A, dynamics.b, dynamics.Q)
+    A, b, Q = fetch_parameters(dynamics, iter; kwargs...)
+    return kalman_predict(state[1], state[2], A, b, Q)
 end
 
 """
@@ -50,16 +65,24 @@ struct LinearGaussianObservation{HT,cT,RT} <: ObservationProcess
     R::RT
 end
 
+function fetch_parameters(observation::LinearGaussianObservation, iter; kwargs...)
+    return (
+        compute_parameter(observation.H, iter; kwargs...),
+        compute_parameter(observation.c, iter; kwargs...),
+        compute_parameter(observation.R, iter; kwargs...)
+    )
+end
+
 function SSMProblems.distribution(
-    observation::LinearGaussianObservation, ::Integer, state; kwargs...
+    observation::LinearGaussianObservation, iter::Integer, state; kwargs...
 )
-    return MvNormal(observation.H * state + observation.c, observation.R)
+    H, c, R = fetch_parameters(observation, iter; kwargs...)
+    return MvNormal(H * state + c, R)
 end
 
 function analytic_update(
     observation::LinearGaussianObservation, iter::Integer, state, data; kwargs...
 )
-    return kalman_update(
-        state[1], state[2], observation.H, observation.c, observation.R, data
-    )
+    H, c, R = fetch_parameters(observation, iter; kwargs...)
+    return kalman_update(state[1], state[2], H, c, R, data)
 end
