@@ -7,8 +7,8 @@ function parameter_sparsity(dynamics::LinearGaussianDynamics, state; kwargs...)
     return [sum(dynamics.A), sum(dynamics.b), sum(dynamics.Q)]
 end
 
-function parameter_sparsity(dynamics::LinearGaussianObservation, state; kwargs...)
-    return [sum(dynamics.H), sum(dynamics.c), sum(dynamics.R)]
+function parameter_sparsity(observation::LinearGaussianObservation, state; kwargs...)
+    return [sum(observation.H), sum(observation.c), sum(observation.R)]
 end
 
 function parameter_sparsity(dynamics::ConditionalDynamics, state; kwargs...)
@@ -17,9 +17,9 @@ function parameter_sparsity(dynamics::ConditionalDynamics, state; kwargs...)
     )
 end
 
-function parameter_sparsity(dynamics::ConditionalObservation, state; kwargs...)
+function parameter_sparsity(observation::ConditionalObservation, state; kwargs...)
     return parameter_sparsity(
-        dynamics.inner_process(state.x, 1; kwargs...), state.z; kwargs...
+        observation.inner_process(state.x, 1; kwargs...), state.z; kwargs...
     )
 end
 
@@ -29,11 +29,14 @@ end
 
 ## TRACER ##################################################################################
 
+# we require `predict` for when the prior doesn't change wrt θ, but subsequent iters do
 function probe_activity(build, θ_free, process::Symbol; kwargs...)
+    rng = Random.default_rng()
     J = jacobian_sparsity(θ_free, TracerLocalSparsityDetector()) do θ
         model = build(θ)
-        state = initialize(Random.default_rng(), model.prior; kwargs...)
-        return parameter_sparsity(getproperty(model, process), state; kwargs...)
+        state = initialize(rng, model.prior; kwargs...)
+        new_state = predict(rng, model.dyn, 1, state; kwargs...)
+        return parameter_sparsity(getproperty(model, process), new_state; kwargs...)
     end
     return Tuple(any(r) for r in eachrow(J))
 end
@@ -64,7 +67,7 @@ end
 """
 function probe_activity(build, θ_free; kwargs...)
     return (
-        dyn = probe_activity(build, θ_free, :dyn; kwargs...),
-        obs = probe_activity(build, θ_free, :obs; kwargs...)
+        dyn=probe_activity(build, θ_free, :dyn; kwargs...),
+        obs=probe_activity(build, θ_free, :obs; kwargs...),
     )
 end

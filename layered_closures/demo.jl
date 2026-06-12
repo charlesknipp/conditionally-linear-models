@@ -13,8 +13,9 @@ include("activity_tracer.jl")
 
 ## STATIC ARRAY SUPPORT ####################################################################
 
-const StaticMvNormal{N,T} =
-    MvNormal{T,PDMat{T,MT},VT} where {N,T,MT<:StaticMatrix{N,N,T},VT<:StaticVector{N,T}}
+const StaticMvNormal{N,T} = MvNormal{T,PDMat{T,MT},VT} where {
+    N,T,MT<:StaticMatrix{N,N,T},VT<:StaticVector{N,T}
+}
 
 function PDMats.unwhiten(
     a::PDMat{T,AT}, x::SVector{N,T}
