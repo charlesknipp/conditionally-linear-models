@@ -24,10 +24,14 @@ include("gradient_mooncake.jl")
 #   Q, R                   fixed parametric   (θ only; hoisted → evaluated once)
 #   s = a * x              shared precompute  (θ AND outer)
 #   A = exp(s) * literal   time-varying parametric (shares s)
-#   b = x * E1             time-varying non-parametric (outer only → ∂b/∂θ = 0)
+#   b = x * [dts[i], 0]    time-varying non-parametric (outer + control → ∂b/∂θ = 0)
 #   H, c, μ0, Σ0           fixed, non-parametric
+#
+# `dts` is a per-step control sequence (e.g. time-step sizes). It is captured by
+# `make_model` and indexed by the step `i` passed to the conditional closures, so
+# it enters the forward pass as a θ-independent constant.
 # ─────────────────────────────────────────────────────────────────────────────
-function make_model(θ)
+function make_model(θ, dts)
     a, logq, logr = θ[1], θ[2], θ[3]
     Q = exp(logq) * @SMatrix [1.0 0.0; 0.0 1.0]    # fixed parametric
     c = @SVector [0.0]
@@ -35,20 +39,20 @@ function make_model(θ)
     H = @SMatrix [1.0 0.0]                         # fixed, non-parametric
 
     prior_fn(x0) = GaussianPrior((@SVector [0.0, 0.0]), (@SMatrix [1.0 0.0; 0.0 1.0]))
-    function dyn_fn(x)
+    function dyn_fn(x, i)
         s = a * x                                  # shared precompute (θ + outer)
         A = exp(s) * @SMatrix [0.5 0.05; 0.0 0.5]  # time-varying parametric (shares s)
-        b = x * @SVector [1.0, 0.0]                # time-varying non-parametric
+        b = x * @SVector [dts[i], 0.0]             # time-varying non-parametric (control)
         return LinearGaussianDynamics(A, b, Q)
     end
-    function obs_fn(x)
+    function obs_fn(x, i)
         return LinearGaussianObservation(H, c, R)
     end
 
     return StateSpaceModel(
-        ConditionalPrior(prior_fn),
+        ConditionalPrior(prior_fn),  # maybe call Hierachical
         ConditionalDynamics(dyn_fn),
-        ConditionalObservation(obs_fn),
+        ConditionalObservation(obs_fn),  # could actually be `LinearGaussianObservation(H, c, R)`
     )
 end
 
@@ -69,13 +73,13 @@ function simulate(rng, model, outer)
 
     zs = Vector{typeof(z)}(undef, length(outer))
     for t in eachindex(outer)
-        d = model.dyn.inner(outer[t])
+        d = model.dyn.inner(outer[t], t)
         z = d.A * z + d.b + cholesky(d.Q).L * randn_svec(rng, Val(length(z)))
         zs[t] = z
     end
 
     return map(eachindex(outer)) do t
-        o = model.obs.inner(outer[t])
+        o = model.obs.inner(outer[t], t)
         o.H * zs[t] + o.c + cholesky(o.R).L * randn_svec(rng, Val(length(o.c)))
     end
 end
@@ -123,13 +127,20 @@ end
 function main()
     T = 30
     outer = [sin(0.3t) for t in 1:T]            # FIXED outer trajectory (conditioning data)
+    dts = [1.0 + 0.5sin(0.5t) for t in 1:T]     # FIXED control sequence (per-step inputs)
+
+    # Fix the controls to obtain a builder that is just θ-dependent — this is the
+    # function the probe traces and the objective differentiates.
+    build = let dts = dts
+        θ -> make_model(θ, dts)
+    end
 
     θ_true = [0.5, -1.0, -1.5]
     rng = MersenneTwister(20240608)
-    ys = simulate(rng, make_model(θ_true), outer)
+    ys = simulate(rng, build(θ_true), outer)
 
     # 1. FILTERING conditioned on the fixed outer trajectory
-    states, ll = run_filter(make_model(θ_true), outer, ys)
+    states, ll = run_filter(build(θ_true), outer, ys)
     println("── Filtering (conditioned on fixed outer trajectory) ──")
     @printf("  steps               : %d\n", T)
     @printf("  final filtered mean : [% .4f, % .4f]\n", states[end].μ...)
@@ -139,9 +150,9 @@ function main()
     θ0 = [0.3, -0.5, -1.0]
 
     # Case 1: differentiate w.r.t. all of θ
-    flags = probe_activity(make_model, θ0, outer[1])
-    logL = let vf = Val(flags)
-        θ -> inner_loglik(with_activity(make_model(θ), vf), outer, ys, kalman_step_analytic)
+    flags = probe_activity(build, θ0, outer[1])
+    logL = let vf = Val(flags), build = build
+        θ -> inner_loglik(with_activity(build(θ), vf), outer, ys, kalman_step_analytic)
     end
     g_mc = mooncake_gradient(logL, θ0)
     report_case("Case 1: ∇ w.r.t. all of θ", flags, θ0, g_mc, central_diff(logL, θ0))
@@ -149,8 +160,8 @@ function main()
     # Case 2: hold a = θ[1] fixed, differentiate w.r.t. θ[2:3] only. The
     # embedding lives in `build23`, which both the probe and the objective use.
     θ23 = θ0[2:3]
-    build23 = let a = θ0[1]
-        θ -> make_model(vcat(a, θ))
+    build23 = let a = θ0[1], dts = dts
+        θ -> make_model(vcat(a, θ), dts)
     end
     flags23 = probe_activity(build23, θ23, outer[1])
     logL23 = let vf = Val(flags23), build = build23

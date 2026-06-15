@@ -115,7 +115,7 @@ end
 struct Reflagged{F,flags}
     f::F
 end
-(r::Reflagged{F,flags})(x) where {F,flags} = _reflag(r.f(x), Val(flags))
+(r::Reflagged{F,flags})(x, i) where {F,flags} = _reflag(r.f(x, i), Val(flags))
 
 function _reflag(d::LinearGaussianDynamics, ::Val{flags}) where {flags}
     return LinearGaussianDynamics{typeof(d.A),typeof(d.b),typeof(d.Q),flags...}(
@@ -191,8 +191,8 @@ function inner_loglik(model::StateSpaceModel, outer, ys, step=kalman_step)
     state = Gaussian(p.μ, p.Σ)
     ll = zero(eltype(p.μ))
     for t in eachindex(ys)
-        dyn = model.dyn.inner(outer[t])
-        obs = model.obs.inner(outer[t])
+        dyn = model.dyn.inner(outer[t], t)
+        obs = model.obs.inner(outer[t], t)
         state, inc = step(state, dyn, obs, ys[t])
         ll += inc
     end
@@ -206,8 +206,8 @@ function run_filter(model::StateSpaceModel, outer, ys)
     states = [state]
     ll = zero(eltype(p.μ))
     for t in eachindex(ys)
-        dyn = model.dyn.inner(outer[t])
-        obs = model.obs.inner(outer[t])
+        dyn = model.dyn.inner(outer[t], t)
+        obs = model.obs.inner(outer[t], t)
         state, inc = kalman_step(state, dyn, obs, ys[t])
         push!(states, state)
         ll += inc
