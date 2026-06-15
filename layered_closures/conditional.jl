@@ -114,36 +114,3 @@ function update(observation::ConditionalObservation, iter::Integer, state, data;
     )
     return (; x=state.x, z), log_likelihood
 end
-
-## CONTROLLED PROCESSES ####################################################################
-
-"""
-    ControlledDynamics
-
-Simple container for controls???
-"""
-struct ControlledDynamics{PT} <: LatentDynamics
-    process::PT
-end
-
-function SSMProblems.simulate(
-    rng::AbstractRNG, dynamics::ControlledDynamics, iter::Integer, state; kwargs...
-)
-    return SSMProblems.simulate(
-        rng, dynamics.process(iter; kwargs...), iter, state; kwargs...
-    )
-end
-
-function SSMProblems.logdensity(
-    dynamics::ControlledDynamics, iter::Integer, prev_state, new_state; kwargs...
-)
-    return SSMProblems.logdensity(
-        observation.process(iter; kwargs...), iter, prev_state, new_state; kwargs...
-    )
-end
-
-function predict(
-    rng::AbstractRNG, dynamics::ControlledDynamics, iter::Integer, state; kwargs...
-)
-    return analytic_predict(dynamics.process(iter; kwargs...), iter, state; kwargs...)
-end

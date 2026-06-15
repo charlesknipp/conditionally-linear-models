@@ -13,8 +13,9 @@ include("activity_tracer.jl")
 
 ## STATIC ARRAY SUPPORT ####################################################################
 
-const StaticMvNormal{N,T} =
-    MvNormal{T,PDMat{T,MT},VT} where {N,T,MT<:StaticMatrix{N,N,T},VT<:StaticVector{N,T}}
+const StaticMvNormal{N,T} = MvNormal{T,PDMat{T,MT},VT} where {
+    N,T,MT<:StaticMatrix{N,N,T},VT<:StaticVector{N,T}
+}
 
 function PDMats.unwhiten(
     a::PDMat{T,AT}, x::SVector{N,T}
@@ -82,13 +83,9 @@ end
 # I haven't thought through the linear Gaussian model with controls yet...
 function linear_dynamics(a::AT, logσ::ΣT) where {AT<:Real,ΣT<:Real}
     Q = exp(logσ) * @SMatrix [1.0 0.0; 0.0 1.0]
-    function inner_process(iter; controls, kwargs...)
-        s = a * controls[iter]
-        A = exp(s) * @SMatrix [0.5 0.05; 0.0 0.5]
-        b = controls[iter] * @SVector [1.0, 0.0]
-        return LinearGaussianDynamics(A, b, Q)
-    end
-    return inner_process
+    A(iter; controls, kwargs...) = exp(a * controls[iter]) * @SMatrix [0.5 0.05; 0.0 0.5]
+    b(iter; controls, kwargs...) = controls[iter] * @SVector [1.0, 0.0]
+    return LinearGaussianDynamics(A, b, Q)
 end
 
 # no closure necessary here
@@ -103,7 +100,7 @@ end
 function control_model(θ)
     return StateSpaceModel(
         GaussianPrior((@SVector [0.0, 0.0]), (@SMatrix [1.0 0.0; 0.0 1.0])),
-        ControlledDynamics(linear_dynamics(θ[1], θ[2])),
+        linear_dynamics(θ[1], θ[2]),
         linear_observation(θ[3]),
     )
 end
