@@ -36,8 +36,12 @@ end
 
 # A wrapped component's cotangent mirrors the nesting: a `WithFlags` tangent whose single
 # `component` field holds the component tangent.
-_mc_dyn_tangent(dyn::WithFlags, g) = MC.build_tangent(typeof(dyn), _mc_dyn_tangent(dyn.component, g))
-_mc_obs_tangent(obs::WithFlags, g) = MC.build_tangent(typeof(obs), _mc_obs_tangent(obs.component, g))
+function _mc_dyn_tangent(dyn::WithFlags, g)
+    return MC.build_tangent(typeof(dyn), _mc_dyn_tangent(dyn.component, g))
+end
+function _mc_obs_tangent(obs::WithFlags, g)
+    return MC.build_tangent(typeof(obs), _mc_obs_tangent(obs.component, g))
+end
 
 MC.@is_primitive MC.DefaultCtx MC.ReverseMode Tuple{
     typeof(kalman_step_analytic),

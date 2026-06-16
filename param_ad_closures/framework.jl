@@ -92,7 +92,9 @@ resolve(component, x0) = component
 struct WithFlags{C,flags}
     component::C
 end
-WithFlags(component, ::Val{flags}) where {flags} = WithFlags{typeof(component),flags}(component)
+function WithFlags(component, ::Val{flags}) where {flags}
+    return WithFlags{typeof(component),flags}(component)
+end
 
 "A component of type `T`, either plain or wrapped in `WithFlags`; a reverse rule accepts both."
 const MaybeWithFlags{T} = Union{T,WithFlags{<:T}}
@@ -123,7 +125,9 @@ type-stable.
 function with_activity(m::StateSpaceModel, ::Val{flags}) where {flags}
     return StateSpaceModel(
         m.prior,
-        ConditionalDynamics(m.dyn.outer, Activated{typeof(m.dyn.inner),flags.dyn}(m.dyn.inner)),
+        ConditionalDynamics(
+            m.dyn.outer, Activated{typeof(m.dyn.inner),flags.dyn}(m.dyn.inner)
+        ),
         ConditionalObservation(Activated{typeof(m.obs.inner),flags.obs}(m.obs.inner)),
     )
 end

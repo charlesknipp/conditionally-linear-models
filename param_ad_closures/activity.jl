@@ -75,13 +75,16 @@ function probe_activity(build, θ_free, x_sample, steps=1:1)
         end
         J = try
             jacobian_sparsity(
-                field_sums, vcat(θ_free, _flatten_outer(x_sample)), TracerSparsityDetector()
+                field_sums,
+                vcat(θ_free, _flatten_outer(x_sample)),
+                TracerSparsityDetector(),
             )
         catch err
             @warn "Activity probe failed — model structure likely branches on θ or the \
                    outer state, so no static activity pattern exists. Falling back to \
                    all-active flags (correct, but no pullbacks are skipped); pass \
-                   hand-written flags to `with_activity` to recover sparsity manually." exception = err
+                   hand-written flags to `with_activity` to recover sparsity manually." exception =
+                err
             return all_active
         end
         step_pattern = [any(@view J[i, 1:nf]) for i in 1:(ndyn + nobs)]

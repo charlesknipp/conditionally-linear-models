@@ -22,7 +22,7 @@ include("gradient_mooncake.jl")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Outer (non-linear, non-Gaussian) latent process: a scalar Gaussian AR(1) with an
-# N(0, 1) prior, expressed via the SSMProblems interface. 
+# N(0, 1) prior, expressed via the SSMProblems interface.
 # ─────────────────────────────────────────────────────────────────────────────
 struct NormalPrior{T} <: StatePrior
     μ::T

@@ -33,27 +33,41 @@ end
 _A_adjoint(::Val{true}, c, g) = _A_adjoint(c, g)
 _A_adjoint(::Val{false}, c, g) = zero(c.A)
 
-_b_adjoint(c, g) = (count_pullback!(:b); g.μ̂̄)
+function _b_adjoint(c, g)
+    count_pullback!(:b)
+    return g.μ̂̄
+end
 _b_adjoint(::Val{true}, c, g) = _b_adjoint(c, g)
 _b_adjoint(::Val{false}, c, g) = zero(g.μ̂̄)
 
-_Q_adjoint(c, g) = (count_pullback!(:Q); g.Σ̂̄)
+function _Q_adjoint(c, g)
+    count_pullback!(:Q)
+    return g.Σ̂̄
+end
 _Q_adjoint(::Val{true}, c, g) = _Q_adjoint(c, g)
 _Q_adjoint(::Val{false}, c, g) = zero(g.Σ̂̄)
 
 function _H_adjoint(c, g)
     count_pullback!(:H)
-    return -c.K' * g.ΔΣ * c.Σ̂ + c.Si * g.K̄' * c.Σ̂ + g.ŷ̄ * c.μ̂' +
+    return -c.K' * g.ΔΣ * c.Σ̂ +
+           c.Si * g.K̄' * c.Σ̂ +
+           g.ŷ̄ * c.μ̂' +
            (g.S̄ + g.S̄') * c.H * c.Σ̂
 end
 _H_adjoint(::Val{true}, c, g) = _H_adjoint(c, g)
 _H_adjoint(::Val{false}, c, g) = zero(c.H)
 
-_c_adjoint(c, g) = (count_pullback!(:c); g.ŷ̄)
+function _c_adjoint(c, g)
+    count_pullback!(:c)
+    return g.ŷ̄
+end
 _c_adjoint(::Val{true}, c, g) = _c_adjoint(c, g)
 _c_adjoint(::Val{false}, c, g) = zero(g.ŷ̄)
 
-_R_adjoint(c, g) = (count_pullback!(:R); g.S̄)
+function _R_adjoint(c, g)
+    count_pullback!(:R)
+    return g.S̄
+end
 _R_adjoint(::Val{true}, c, g) = _R_adjoint(c, g)
 _R_adjoint(::Val{false}, c, g) = zero(g.S̄)
 
