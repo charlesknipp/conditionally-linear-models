@@ -9,8 +9,8 @@
 # The probe traces the free parameters and the outer state jointly using
 # SparseConnectivityTracer's global (set-valued, primal-free) tracers. If the model
 # structure contains branching on a traced input, the probe errors and we fall back to
-# all-active flags, which are always sound. Manual `Inactive` annotations remain as the
-# escape hatch to recover sparsity for such models.
+# all-active flags, which are always sound. To recover sparsity for such models, pass
+# hand-written flags to `with_activity` manually.
 
 using SparseConnectivityTracer: TracerSparsityDetector, jacobian_sparsity
 using StaticArrays: StaticArray, similar_type
@@ -71,8 +71,8 @@ function probe_activity(build, θ_free, x_sample)
     catch err
         @warn "Activity probe failed — model structure likely branches on θ or the outer \
                state, so no static activity pattern exists. Falling back to all-active \
-               flags (correct, but no pullbacks are skipped); use `Inactive` to annotate \
-               manually." exception = err
+               flags (correct, but no pullbacks are skipped); pass hand-written flags to \
+               `with_activity` to recover sparsity manually." exception = err
         return all_active
     end
     active = Tuple(any(@view J[i, 1:nf]) for i in 1:(ndyn + nobs))

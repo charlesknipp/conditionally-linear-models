@@ -2,8 +2,8 @@
 # Demo: a Rao-Blackwellised model defined with closures, filtered and
 # differentiated w.r.t. θ conditioned on a fixed outer trajectory.
 #
-# Activity (which atom fields depend on the free parameters) is detected
-# automatically by `probe_activity` — no manual `Inactive` annotations. The
+# Activity (which component fields depend on the free parameters) is detected
+# automatically by `probe_activity`. The
 # probe receives the same `θ_free -> model` builder that is differentiated,
 # so the embedding of free parameters is defined in exactly one place:
 #   Case 1: ∇ w.r.t. all of θ → b, H, c inactive (θ-independent)
@@ -147,7 +147,8 @@ function main()
 
     θ0 = [0.3, -0.5, -1.0]
 
-    # Case 1: differentiate w.r.t. all of θ
+    # Case 1: differentiate w.r.t. all of θ. Probing is opt-in — without
+    # `with_activity` the model keeps the all-active default (every adjoint computed).
     flags = probe_activity(build, θ0, outer[1])
     logL = let vf = Val(flags), build = build
         θ -> inner_loglik(with_activity(build(θ), vf), outer, ys, kalman_step_analytic)

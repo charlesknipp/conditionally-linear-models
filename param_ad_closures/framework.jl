@@ -18,25 +18,11 @@ struct Gaussian{T,D,L}
     Σ::SMatrix{D,D,T,L}
 end
 
-## ATOMS ######################################################################
-# `Inactive(x)` marks a field as independent of the differentiated model
-# parameters. Atom constructors unwrap it and retain the activity flag in the
-# atom's type, so forward computations still see the original value directly.
-
-"""
-    Inactive(value)
-
-Mark an atom field as independent of the differentiated model parameters. Atom
-constructors unwrap `value` and encode its inactivity in the atom's type.
-"""
-struct Inactive{T}
-    value::T
-end
-
-_unwrap(x) = x
-_unwrap(x::Inactive) = x.value
-_active(x) = true
-_active(::Inactive) = false
+## COMPONENTS #################################################################
+# Each component carries one activity flag per parameter field as a trailing
+# type parameter. Components default to active (every adjoint computed, always
+# correct); `with_activity` (below) is the single point that re-stamps the flags
+# from the probe to skip the adjoints of θ-independent fields.
 
 struct LinearGaussianDynamics{TA,Tb,TQ,AA,Ab,AQ}
     A::TA
@@ -45,17 +31,7 @@ struct LinearGaussianDynamics{TA,Tb,TQ,AA,Ab,AQ}
 end
 
 function LinearGaussianDynamics(A, b, Q)
-    values = (_unwrap(A), _unwrap(b), _unwrap(Q))
-    return LinearGaussianDynamics{
-        typeof(values[1]),
-        typeof(values[2]),
-        typeof(values[3]),
-        _active(A),
-        _active(b),
-        _active(Q),
-    }(
-        values...
-    )
+    return LinearGaussianDynamics{typeof(A),typeof(b),typeof(Q),true,true,true}(A, b, Q)
 end
 
 struct LinearGaussianObservation{TH,Tc,TR,AH,Ac,AR}
@@ -65,17 +41,7 @@ struct LinearGaussianObservation{TH,Tc,TR,AH,Ac,AR}
 end
 
 function LinearGaussianObservation(H, c, R)
-    values = (_unwrap(H), _unwrap(c), _unwrap(R))
-    return LinearGaussianObservation{
-        typeof(values[1]),
-        typeof(values[2]),
-        typeof(values[3]),
-        _active(H),
-        _active(c),
-        _active(R),
-    }(
-        values...
-    )
+    return LinearGaussianObservation{typeof(H),typeof(c),typeof(R),true,true,true}(H, c, R)
 end
 
 struct GaussianPrior{Tμ,TΣ}
@@ -84,8 +50,9 @@ struct GaussianPrior{Tμ,TΣ}
 end
 
 ## CONDITIONAL WRAPPERS ########################################################
-# Each holds a closure `outer_state -> atom`. The closure captures θ-derived
-# constants (hoisted by capture) and computes conditioning-dependent parts inline.
+# Each holds either a constant component or a closure `(outer_state, t) -> component`.
+# A closure captures θ-derived constants (hoisted by capture) and computes
+# conditioning-dependent parts inline. See `resolve` for how the two forms unify.
 
 struct ConditionalPrior{F}
     inner::F
@@ -116,12 +83,12 @@ resolve(f::Function, x0) = f(x0)
 resolve(component, x0) = component
 
 ## ACTIVITY STAMPING ###########################################################
-# `with_activity` composes each conditional closure with `_reflag`, which
-# re-stamps the activity type parameters of the atom it builds. This lets
-# probed flags (see `probe_activity` in activity.jl) drive the pullback
-# skipping in the analytical reverse rule without manual `Inactive`
-# annotations and without changing any call site: the wrapped closure still
-# sits in the `inner` field.
+# `with_activity` composes each conditional component with `_reflag`, which
+# re-stamps the activity type parameters of the component it resolves. This is
+# the single point where activity is set: probed flags (see `probe_activity` in
+# activity.jl) drive the pullback skipping in the analytical reverse rule without
+# changing any call site. A model never passed through `with_activity` keeps the
+# all-active default, so its gradient is always correct.
 
 "Callable composing a component (closure or constant) with an activity re-stamp."
 struct Reflagged{F,flags} <: Function
@@ -144,9 +111,9 @@ end
     with_activity(model, ::Val{flags})
 
 Stamp probed activity flags (`(dyn=..., obs=...)`, see `probe_activity`) into
-the atoms built by the model's conditional closures. `flags` must be a
-type-domain constant (`Val` built outside the differentiated region) so the
-stamped model is type-stable.
+the model's conditional components. `flags` must be a type-domain constant
+(`Val` built outside the differentiated region) so the stamped model is
+type-stable.
 """
 function with_activity(m::StateSpaceModel, ::Val{flags}) where {flags}
     return StateSpaceModel(
