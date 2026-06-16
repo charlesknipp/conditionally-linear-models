@@ -1,8 +1,10 @@
 # Automatic activity detection.
 #
-# Whether a model parameter (A, b, Q, H, c, R) depends on the free parameters is a static
-# property of the model structure, so it is probed ONCE at sampler setup and the flags are
-# reused across every Gibbs sweep and NUTS iteration.
+# Whether a model parameter depends on the free parameters is a static property of the
+# model structure, so it is probed ONCE at sampler setup and the flags are reused across
+# every Gibbs sweep and NUTS iteration. The probe reads the parameter fields of each
+# component generically (via `fieldnames`), so it is independent of the particular filter
+# kernel — any component whose fields are its differentiable parameters works.
 #
 # The probe traces the free parameters and the outer state jointly using
 # SparseConnectivityTracer's global (set-valued, primal-free) tracers. If the model
@@ -12,8 +14,6 @@
 
 using SparseConnectivityTracer: TracerSparsityDetector, jacobian_sparsity
 using StaticArrays: StaticArray, similar_type
-
-const ALL_ACTIVE = (dyn=(true, true, true), obs=(true, true, true))
 
 # Rebuild the traced outer-state entries in `x_sample`'s container type, so the
 # conditional closures see the same array types during the probe as in the real
@@ -25,27 +25,36 @@ _rebuild_outer(x::AbstractArray, vals) = reshape(collect(vals), size(x))
 _flatten_outer(x::Real) = x
 _flatten_outer(x::AbstractArray) = vec(x)
 
+# Sum each parameter field of a component to a scalar, so a Jacobian row is nonempty iff
+# that field touches a traced input. Independent of the field names or the kernel.
+function _field_sums(component)
+    return [sum(getfield(component, i)) for i in 1:fieldcount(typeof(component))]
+end
+
 """
     probe_activity(build, θ_free, x_sample)
 
-Trace which atom fields depend on the free parameters, evaluating the
-conditional closures at the representative outer state `x_sample`. `build`
-maps a free-parameter vector to a model and must be the SAME function whose
-output is differentiated — any embedding of `θ_free` into a fuller parameter
-vector lives inside `build`, so probe and objective cannot drift apart.
-Fixed values captured by `build` enter the trace as constants (empty pattern).
+Trace which component parameter fields depend on the free parameters, evaluating the
+conditional components at the representative outer state `x_sample`. `build` maps a
+free-parameter vector to a model and must be the SAME function whose output is
+differentiated — any embedding of `θ_free` into a fuller parameter vector lives inside
+`build`, so probe and objective cannot drift apart. Fixed values captured by `build`
+enter the trace as constants (empty pattern).
 
-Returns activity flags `(dyn=(A, b, Q), obs=(H, c, R))`; wrap in `Val` and
-pass to `with_activity`. Runs once per choice of `build`: completing without
-error certifies that the flags hold for every outer trajectory and every
-value of `θ_free`.
+Returns activity flags `(dyn=(...), obs=(...))`, one Boolean per parameter field of the
+dynamics and observation components; wrap in `Val` and pass to `with_activity`. Runs once
+per choice of `build`: completing without error certifies that the flags hold for every
+outer trajectory and every value of `θ_free`.
 """
 function probe_activity(build, θ_free, x_sample)
     nf = length(θ_free)
-    # Each output sums one field's entries; under set-union semantics a row is
-    # nonempty iff any entry of that field touches a traced input. Activity is
-    # read off the θ columns; the x columns are ignored (they would instead
-    # indicate time variation).
+    # The field layout of each component (from one concrete build) splits the flat
+    # Jacobian rows back into per-component flag tuples.
+    m0 = build(θ_free)
+    ndyn = fieldcount(typeof(resolve(m0.dyn.inner, x_sample, 1)))
+    nobs = fieldcount(typeof(resolve(m0.obs.inner, x_sample, 1)))
+    all_active = (dyn=ntuple(_ -> true, ndyn), obs=ntuple(_ -> true, nobs))
+
     function field_sums(v)
         x = _rebuild_outer(x_sample, @view v[(nf + 1):end])
         m = build(v[1:nf])
@@ -53,7 +62,7 @@ function probe_activity(build, θ_free, x_sample)
         # step. I guess we could also probe this like we probe the outer state?
         d = resolve(m.dyn.inner, x, 1)
         o = resolve(m.obs.inner, x, 1)
-        return [sum(d.A), sum(d.b), sum(d.Q), sum(o.H), sum(o.c), sum(o.R)]
+        return vcat(_field_sums(d), _field_sums(o))
     end
     J = try
         jacobian_sparsity(
@@ -64,8 +73,8 @@ function probe_activity(build, θ_free, x_sample)
                state, so no static activity pattern exists. Falling back to all-active \
                flags (correct, but no pullbacks are skipped); use `Inactive` to annotate \
                manually." exception = err
-        return ALL_ACTIVE
+        return all_active
     end
-    active = Tuple(any(@view J[i, 1:nf]) for i in 1:6)
-    return (dyn=active[1:3], obs=active[4:6])
+    active = Tuple(any(@view J[i, 1:nf]) for i in 1:(ndyn + nobs))
+    return (dyn=active[1:ndyn], obs=active[(ndyn + 1):(ndyn + nobs)])
 end
