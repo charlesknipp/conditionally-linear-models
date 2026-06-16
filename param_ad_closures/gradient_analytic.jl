@@ -5,7 +5,10 @@ const PULLBACK_COUNT = Dict{Symbol,Int}()
 count_pullback!(k) = (PULLBACK_COUNT[k] = get(PULLBACK_COUNT, k, 0) + 1; nothing)
 reset_pullback_count!() = empty!(PULLBACK_COUNT)
 
-kalman_step_analytic(state, dyn, obs, y) = (r = _kalman_forward(state, dyn, obs, y); (r[1], r[2]))
+function kalman_step_analytic(state, dyn, obs, y)
+    r = _kalman_forward(state, _component(dyn), _component(obs), y)
+    return (r[1], r[2])
+end
 
 "Shared reverse recursion required to propagate the filtered state cotangent backwards."
 function _kalman_reverse_core(c, Δμ, ΔΣ, δll)
@@ -54,23 +57,18 @@ _R_adjoint(c, g) = (count_pullback!(:R); g.S̄)
 _R_adjoint(::Val{true}, c, g) = _R_adjoint(c, g)
 _R_adjoint(::Val{false}, c, g) = zero(g.S̄)
 
-function _kalman_adjoints(
-    c,
-    Δμ,
-    ΔΣ,
-    δll,
-    dyn::LinearGaussianDynamics{TA,Tb,TQ,AA,Ab,AQ},
-    obs::LinearGaussianObservation{TH,Tc,TR,AH,Ac,AR},
-) where {TA,Tb,TQ,AA,Ab,AQ,TH,Tc,TR,AH,Ac,AR}
+function _kalman_adjoints(c, Δμ, ΔΣ, δll, dyn, obs)
+    fdyn = _field_flags(dyn)
+    fobs = _field_flags(obs)
     g = _kalman_reverse_core(c, Δμ, ΔΣ, δll)
     return (;
         g.μ0̄,
         g.Σ0̄,
-        Ā=_A_adjoint(Val(AA), c, g),
-        b̄=_b_adjoint(Val(Ab), c, g),
-        Q̄=_Q_adjoint(Val(AQ), c, g),
-        H̄=_H_adjoint(Val(AH), c, g),
-        c̄=_c_adjoint(Val(Ac), c, g),
-        R̄=_R_adjoint(Val(AR), c, g),
+        Ā=_A_adjoint(Val(fdyn[1]), c, g),
+        b̄=_b_adjoint(Val(fdyn[2]), c, g),
+        Q̄=_Q_adjoint(Val(fdyn[3]), c, g),
+        H̄=_H_adjoint(Val(fobs[1]), c, g),
+        c̄=_c_adjoint(Val(fobs[2]), c, g),
+        R̄=_R_adjoint(Val(fobs[3]), c, g),
     )
 end

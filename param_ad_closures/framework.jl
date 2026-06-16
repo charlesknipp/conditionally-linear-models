@@ -19,29 +19,20 @@ struct Gaussian{T,D,L}
 end
 
 ## COMPONENTS #################################################################
-# Each component carries one activity flag per parameter field as a trailing
-# type parameter. Components default to active (every adjoint computed, always
-# correct); `with_activity` (below) is the single point that re-stamps the flags
-# from the probe to skip the adjoints of θ-independent fields.
+# A component holds the parameters of one part of the model (e.g. A, b, Q for the
+# dynamics). Activity — which fields depend on θ — is carried separately by the
+# `WithFlags` wrapper (see below).
 
-struct LinearGaussianDynamics{TA,Tb,TQ,AA,Ab,AQ}
+struct LinearGaussianDynamics{TA,Tb,TQ}
     A::TA
     b::Tb
     Q::TQ
 end
 
-function LinearGaussianDynamics(A, b, Q)
-    return LinearGaussianDynamics{typeof(A),typeof(b),typeof(Q),true,true,true}(A, b, Q)
-end
-
-struct LinearGaussianObservation{TH,Tc,TR,AH,Ac,AR}
+struct LinearGaussianObservation{TH,Tc,TR}
     H::TH
     c::Tc
     R::TR
-end
-
-function LinearGaussianObservation(H, c, R)
-    return LinearGaussianObservation{typeof(H),typeof(c),typeof(R),true,true,true}(H, c, R)
 end
 
 struct GaussianPrior{Tμ,TΣ}
@@ -83,29 +74,37 @@ resolve(f::Function, x0) = f(x0)
 resolve(component, x0) = component
 
 ## ACTIVITY STAMPING ###########################################################
-# `with_activity` composes each conditional component with `_reflag`, which
-# re-stamps the activity type parameters of the component it resolves. This is
-# the single point where activity is set: probed flags (see `probe_activity` in
-# activity.jl) drive the pullback skipping in the analytical reverse rule without
-# changing any call site. A model never passed through `with_activity` keeps the
-# all-active default, so its gradient is always correct.
+# Activity is carried by a `WithFlags` wrapper, independent of the filter kernel.
+# `with_activity` is the single point where activity is set: it composes each
+# conditional component with `Activated`, which wraps the resolved component in
+# `WithFlags{component, flags}`. The `flags` (a per-field Boolean tuple,
+# type-domain) drive the pullback skipping in the analytical reverse rule. A
+# model not passed through `with_activity` yields plain components — every adjoint
+# computed — so its gradient is correct by default.
 
-"Callable composing a component (closure or constant) with an activity re-stamp."
-struct Reflagged{F,flags} <: Function
+"Pairs a component with its per-field activity flags (a type-domain Boolean tuple)."
+struct WithFlags{C,flags}
+    component::C
+end
+WithFlags(component, ::Val{flags}) where {flags} = WithFlags{typeof(component),flags}(component)
+
+"A component of type `T`, either plain or wrapped in `WithFlags`; a reverse rule accepts both."
+const MaybeWithFlags{T} = Union{T,WithFlags{<:T}}
+
+# Unwrap a (possibly flagged) component back to the plain component the forward pass sees.
+_component(w::WithFlags) = w.component
+_component(c) = c
+
+# Activity flags for a component: the flags it was wrapped with, or all-active for a plain
+# component (so the handwritten rule serves the all-active default, with no `with_activity`).
+_field_flags(::WithFlags{C,flags}) where {C,flags} = flags
+_field_flags(component) = ntuple(Returns(true), Val(fieldcount(typeof(component))))
+
+"Per-step closure that resolves its component and stamps the activity flags."
+struct Activated{F,flags} <: Function
     f::F
 end
-(r::Reflagged{F,flags})(x, i) where {F,flags} = _reflag(resolve(r.f, x, i), Val(flags))
-
-function _reflag(d::LinearGaussianDynamics, ::Val{flags}) where {flags}
-    return LinearGaussianDynamics{typeof(d.A),typeof(d.b),typeof(d.Q),flags...}(
-        d.A, d.b, d.Q
-    )
-end
-function _reflag(o::LinearGaussianObservation, ::Val{flags}) where {flags}
-    return LinearGaussianObservation{typeof(o.H),typeof(o.c),typeof(o.R),flags...}(
-        o.H, o.c, o.R
-    )
-end
+(a::Activated{F,flags})(x, i) where {F,flags} = WithFlags(resolve(a.f, x, i), Val(flags))
 
 """
     with_activity(model, ::Val{flags})
@@ -118,8 +117,8 @@ type-stable.
 function with_activity(m::StateSpaceModel, ::Val{flags}) where {flags}
     return StateSpaceModel(
         m.prior,
-        ConditionalDynamics(Reflagged{typeof(m.dyn.inner),flags.dyn}(m.dyn.inner)),
-        ConditionalObservation(Reflagged{typeof(m.obs.inner),flags.obs}(m.obs.inner)),
+        ConditionalDynamics(Activated{typeof(m.dyn.inner),flags.dyn}(m.dyn.inner)),
+        ConditionalObservation(Activated{typeof(m.obs.inner),flags.obs}(m.obs.inner)),
     )
 end
 
