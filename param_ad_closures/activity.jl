@@ -32,7 +32,7 @@ function _field_sums(component)
 end
 
 """
-    probe_activity(build, θ_free, x_sample)
+    probe_activity(build, θ_free, x_sample, steps=1:1)
 
 Trace which component parameter fields depend on the free parameters, evaluating the
 conditional components at the representative outer state `x_sample`. `build` maps a
@@ -41,40 +41,60 @@ differentiated — any embedding of `θ_free` into a fuller parameter vector liv
 `build`, so probe and objective cannot drift apart. Fixed values captured by `build`
 enter the trace as constants (empty pattern).
 
+The probe is repeated at each concrete time index in `steps` (e.g. `1:T`) and the per-step
+activity patterns are unioned. The union is always sound — a field is marked active if it
+depends on θ at *any* step — which closes the hole where a model gates its θ-dependence on
+a control value or the step index (`dts[t] > 1` and the like): such gating is swept by
+trying every step. Branching on a *traced* input (θ or the outer state) still errors and
+falls back to all-active. A warning is emitted if the pattern is not constant across steps
+(the union is used regardless). Pass the full step range for the guarantee; the default
+`1:1` probes a single representative step.
+
 Returns activity flags `(dyn=(...), obs=(...))`, one Boolean per parameter field of the
-dynamics and observation components; wrap in `Val` and pass to `with_activity`. Runs once
-per choice of `build`: completing without error certifies that the flags hold for every
-outer trajectory and every value of `θ_free`.
+dynamics and observation components; wrap in `Val` and pass to `with_activity`.
 """
-function probe_activity(build, θ_free, x_sample)
+function probe_activity(build, θ_free, x_sample, steps=1:1)
     nf = length(θ_free)
     # The field layout of each component (from one concrete build) splits the flat
     # Jacobian rows back into per-component flag tuples.
     m0 = build(θ_free)
-    ndyn = fieldcount(typeof(resolve(m0.dyn.inner, x_sample, 1)))
-    nobs = fieldcount(typeof(resolve(m0.obs.inner, x_sample, 1)))
+    ndyn = fieldcount(typeof(resolve(m0.dyn.inner, x_sample, first(steps))))
+    nobs = fieldcount(typeof(resolve(m0.obs.inner, x_sample, first(steps))))
     all_active = (dyn=ntuple(_ -> true, ndyn), obs=ntuple(_ -> true, nobs))
 
-    function field_sums(v)
-        x = _rebuild_outer(x_sample, @view v[(nf + 1):end])
-        m = build(v[1:nf])
-        # Index 1 is a representative time step. Assumes θ-dependence doesn't branch on time
-        # step. I guess we could also probe this like we probe the outer state?
-        d = resolve(m.dyn.inner, x, 1)
-        o = resolve(m.obs.inner, x, 1)
-        return vcat(_field_sums(d), _field_sums(o))
+    union_pattern = falses(ndyn + nobs)
+    first_pattern = nothing
+    varies = false
+    for t in steps
+        function field_sums(v)
+            x = _rebuild_outer(x_sample, @view v[(nf + 1):end])
+            m = build(v[1:nf])
+            d = resolve(m.dyn.inner, x, t)
+            o = resolve(m.obs.inner, x, t)
+            return vcat(_field_sums(d), _field_sums(o))
+        end
+        J = try
+            jacobian_sparsity(
+                field_sums, vcat(θ_free, _flatten_outer(x_sample)), TracerSparsityDetector()
+            )
+        catch err
+            @warn "Activity probe failed — model structure likely branches on θ or the \
+                   outer state, so no static activity pattern exists. Falling back to \
+                   all-active flags (correct, but no pullbacks are skipped); pass \
+                   hand-written flags to `with_activity` to recover sparsity manually." exception = err
+            return all_active
+        end
+        step_pattern = [any(@view J[i, 1:nf]) for i in 1:(ndyn + nobs)]
+        union_pattern .|= step_pattern
+        if first_pattern === nothing
+            first_pattern = step_pattern
+        elseif step_pattern != first_pattern
+            varies = true
+        end
     end
-    J = try
-        jacobian_sparsity(
-            field_sums, vcat(θ_free, _flatten_outer(x_sample)), TracerSparsityDetector()
-        )
-    catch err
-        @warn "Activity probe failed — model structure likely branches on θ or the outer \
-               state, so no static activity pattern exists. Falling back to all-active \
-               flags (correct, but no pullbacks are skipped); pass hand-written flags to \
-               `with_activity` to recover sparsity manually." exception = err
-        return all_active
-    end
-    active = Tuple(any(@view J[i, 1:nf]) for i in 1:(ndyn + nobs))
+    varies && @warn "Activity pattern varies across time steps; using the union (sound, \
+                     but adjoints are computed at steps where a field is inactive). This \
+                     usually means the model gates θ-dependence on a control or the step index."
+    active = Tuple(union_pattern)
     return (dyn=active[1:ndyn], obs=active[(ndyn + 1):(ndyn + nobs)])
 end

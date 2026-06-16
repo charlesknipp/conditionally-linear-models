@@ -149,7 +149,7 @@ function main()
 
     # Case 1: differentiate w.r.t. all of θ. Probing is opt-in — without
     # `with_activity` the model keeps the all-active default (every adjoint computed).
-    flags = probe_activity(build, θ0, outer[1])
+    flags = probe_activity(build, θ0, outer[1], eachindex(outer))
     logL = let vf = Val(flags), build = build
         θ -> inner_loglik(with_activity(build(θ), vf), outer, ys, kalman_step_analytic)
     end
@@ -162,7 +162,7 @@ function main()
     build23 = let a = θ0[1], dts = dts
         θ -> make_model(vcat(a, θ), dts)
     end
-    flags23 = probe_activity(build23, θ23, outer[1])
+    flags23 = probe_activity(build23, θ23, outer[1], eachindex(outer))
     logL23 = let vf = Val(flags23), build = build23
         θ -> inner_loglik(with_activity(build(θ), vf), outer, ys, kalman_step_analytic)
     end
