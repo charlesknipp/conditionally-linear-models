@@ -41,14 +41,19 @@ struct GaussianPrior{Tμ,TΣ}
 end
 
 ## CONDITIONAL WRAPPERS ########################################################
-# Each holds either a constant component or a closure `(outer_state, t) -> component`.
-# A closure captures θ-derived constants (hoisted by capture) and computes
-# conditioning-dependent parts inline. See `resolve` for how the two forms unify.
+# The prior and dynamics each pair an `outer` process (the non-linear, non-Gaussian latent
+# x, an SSMProblems `StatePrior`/`LatentDynamics`) with an `inner` linear-Gaussian
+# component for z given x. The observation has only an inner part. `inner` is either a
+# constant component or a closure `(x, t) -> component` (a closure captures θ-derived
+# constants and computes conditioning-dependent parts inline); see `resolve` for how the
+# two forms unify.
 
-struct ConditionalPrior{F}
+struct ConditionalPrior{O,F}
+    outer::O
     inner::F
 end
-struct ConditionalDynamics{F}
+struct ConditionalDynamics{O,F}
+    outer::O
     inner::F
 end
 struct ConditionalObservation{F}
@@ -117,7 +122,7 @@ type-stable.
 function with_activity(m::StateSpaceModel, ::Val{flags}) where {flags}
     return StateSpaceModel(
         m.prior,
-        ConditionalDynamics(Activated{typeof(m.dyn.inner),flags.dyn}(m.dyn.inner)),
+        ConditionalDynamics(m.dyn.outer, Activated{typeof(m.dyn.inner),flags.dyn}(m.dyn.inner)),
         ConditionalObservation(Activated{typeof(m.obs.inner),flags.obs}(m.obs.inner)),
     )
 end

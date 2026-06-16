@@ -10,13 +10,31 @@
 #   Case 2: ∇ w.r.t. θ[2:3]   → A also inactive (depends on θ only via θ[1])
 # ─────────────────────────────────────────────────────────────────────────────
 
-using StaticArrays, LinearAlgebra, Random, Printf
+using StaticArrays, LinearAlgebra, Random, Printf, Distributions
+using SSMProblems: StatePrior, LatentDynamics, simulate, logdensity
+import SSMProblems: distribution
 import Mooncake as MC
 
 include("framework.jl")
 include("activity.jl")
 include("gradient_analytic.jl")
 include("gradient_mooncake.jl")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Outer (non-linear, non-Gaussian) latent process: a scalar Gaussian AR(1) with an
+# N(0, 1) prior, expressed via the SSMProblems interface. 
+# ─────────────────────────────────────────────────────────────────────────────
+struct NormalPrior <: StatePrior
+    μ::Float64
+    σ::Float64
+end
+distribution(p::NormalPrior) = Normal(p.μ, p.σ)
+
+struct AR1 <: LatentDynamics
+    φ::Float64
+    τ::Float64
+end
+distribution(d::AR1, step::Integer, prev_state) = Normal(d.φ * prev_state, d.τ)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Parametric model.  θ = [a, logq, logr]. Inner 2-D linear-Gaussian state
@@ -48,8 +66,8 @@ function make_model(θ, dts)
         return LinearGaussianDynamics(A, b, Q)
     end
     return StateSpaceModel(
-        ConditionalPrior(GaussianPrior(μ0, Σ0)),
-        ConditionalDynamics(dyn_fn),
+        ConditionalPrior(NormalPrior(0.0, 1.0), GaussianPrior(μ0, Σ0)),
+        ConditionalDynamics(AR1(0.9, 0.3), dyn_fn),
         ConditionalObservation(LinearGaussianObservation(H, c, R)),
     )
 end
@@ -65,21 +83,29 @@ end
 
 randn_svec(rng, ::Val{D}) where {D} = SVector{D}(ntuple(_ -> randn(rng), D))
 
-function simulate(rng, model, outer)
+function simulate_data(rng, model, T::Integer)
+    # outer (non-linear) latent trajectory, sampled from the model's outer process
+    outer = Vector{Float64}(undef, T)
+    outer[1] = simulate(rng, model.prior.outer)
+    for t in 2:T
+        outer[t] = simulate(rng, model.dyn.outer, t, outer[t - 1])
+    end
+
+    # inner (linear-Gaussian) trajectory conditioned on the outer one
     p = resolve(model.prior.inner, outer[1])
     z = p.μ + cholesky(p.Σ).L * randn_svec(rng, Val(length(p.μ)))
-
-    zs = Vector{typeof(z)}(undef, length(outer))
-    for t in eachindex(outer)
+    zs = Vector{typeof(z)}(undef, T)
+    for t in 1:T
         d = resolve(model.dyn.inner, outer[t], t)
         z = d.A * z + d.b + cholesky(d.Q).L * randn_svec(rng, Val(length(z)))
         zs[t] = z
     end
 
-    return map(eachindex(outer)) do t
+    ys = map(1:T) do t
         o = resolve(model.obs.inner, outer[t], t)
         o.H * zs[t] + o.c + cholesky(o.R).L * randn_svec(rng, Val(length(o.c)))
     end
+    return outer, ys
 end
 
 ## FINITE-DIFFERENCE GRADIENT (reference) #####################################
@@ -124,7 +150,6 @@ end
 
 function main()
     T = 30
-    outer = [sin(0.3t) for t in 1:T]            # FIXED outer trajectory (conditioning data)
     dts = [1.0 + 0.5sin(0.5t) for t in 1:T]     # FIXED control sequence (per-step inputs)
 
     # Fix the controls to obtain a builder that is just θ-dependent — this is the
@@ -135,7 +160,8 @@ function main()
 
     θ_true = [0.5, -1.0, -1.5]
     rng = MersenneTwister(20240608)
-    ys = simulate(rng, build(θ_true), outer)
+    # Sample the outer trajectory from the model, then condition on it below.
+    outer, ys = simulate_data(rng, build(θ_true), T)
 
     # 1. FILTERING conditioned on the fixed outer trajectory
     states, ll = run_filter(build(θ_true), outer, ys)
