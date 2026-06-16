@@ -9,6 +9,7 @@
 
 using StaticArrays
 using LinearAlgebra
+using SSMProblems: logdensity
 
 ## GAUSSIAN ####################################################################
 
@@ -180,6 +181,27 @@ function inner_loglik(model::StateSpaceModel, outer, ys, step=kalman_step)
         ll += inc
     end
     return ll
+end
+
+"""
+Log-density of a fixed `outer` trajectory under the model's outer prior and dynamics,
+scored through the SSMProblems interface.
+"""
+function outer_loglik(model::StateSpaceModel, outer)
+    ll = logdensity(model.prior.outer, outer[1])
+    for t in 2:length(outer)
+        ll += logdensity(model.dyn.outer, t, outer[t - 1], outer[t])
+    end
+    return ll
+end
+
+"""
+Joint log-density of the conditionally-linear-Gaussian model: the outer trajectory plus the
+inner marginal likelihood. This is the scalar differentiated w.r.t. θ in the RBPG parameter
+step — θ may enter both the outer process and the inner components.
+"""
+function joint_loglik(model::StateSpaceModel, outer, ys, step=kalman_step)
+    return outer_loglik(model, outer) + inner_loglik(model, outer, ys, step)
 end
 
 "As `inner_loglik`, but also returns the sequence of filtered Gaussians."
