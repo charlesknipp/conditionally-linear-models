@@ -17,7 +17,7 @@ function _mc_state_tangent(state, g)
     )
 end
 
-function _mc_dyn_tangent(dyn, g)
+function _mc_dyn_tangent(dyn::LinearGaussianDynamics, g)
     return MC.build_tangent(
         typeof(dyn),
         _mc_static_tangent(g.Ā),
@@ -25,8 +25,7 @@ function _mc_dyn_tangent(dyn, g)
         _mc_static_tangent(g.Q̄),
     )
 end
-
-function _mc_obs_tangent(obs, g)
+function _mc_obs_tangent(obs::LinearGaussianObservation, g)
     return MC.build_tangent(
         typeof(obs),
         _mc_static_tangent(g.H̄),
@@ -35,26 +34,35 @@ function _mc_obs_tangent(obs, g)
     )
 end
 
+# A wrapped component's cotangent mirrors the nesting: a `WithFlags` tangent whose single
+# `component` field holds the component tangent.
+function _mc_dyn_tangent(dyn::WithFlags, g)
+    return MC.build_tangent(typeof(dyn), _mc_dyn_tangent(dyn.component, g))
+end
+function _mc_obs_tangent(obs::WithFlags, g)
+    return MC.build_tangent(typeof(obs), _mc_obs_tangent(obs.component, g))
+end
+
 MC.@is_primitive MC.DefaultCtx MC.ReverseMode Tuple{
     typeof(kalman_step_analytic),
     Gaussian,
-    LinearGaussianDynamics,
-    LinearGaussianObservation,
+    MaybeWithFlags{LinearGaussianDynamics},
+    MaybeWithFlags{LinearGaussianObservation},
     StaticVector,
 }
 
 function MC.rrule!!(
     ::MC.CoDual{typeof(kalman_step_analytic)},
     state_cd::MC.CoDual{<:Gaussian},
-    dyn_cd::MC.CoDual{<:LinearGaussianDynamics},
-    obs_cd::MC.CoDual{<:LinearGaussianObservation},
+    dyn_cd::MC.CoDual{<:MaybeWithFlags{LinearGaussianDynamics}},
+    obs_cd::MC.CoDual{<:MaybeWithFlags{LinearGaussianObservation}},
     y_cd::MC.CoDual{<:StaticVector},
 )
     state = MC.primal(state_cd)
     dyn = MC.primal(dyn_cd)
     obs = MC.primal(obs_cd)
     y = MC.primal(y_cd)
-    new_state, ll, c = _kalman_forward(state, dyn, obs, y)
+    new_state, ll, c = _kalman_forward(state, _component(dyn), _component(obs), y)
     out_cd = MC.zero_fcodual((new_state, ll))
 
     function kalman_step_pullback!!(dy_rdata)

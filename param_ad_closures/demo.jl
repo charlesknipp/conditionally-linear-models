@@ -1,16 +1,18 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Demo: a Rao-Blackwellised model defined with closures, filtered and
-# differentiated w.r.t. θ conditioned on a fixed outer trajectory.
+# Demo: a Rao-Blackwellised model defined with closures, with the joint (outer + inner)
+# log-density differentiated w.r.t. θ conditioned on a fixed outer trajectory.
 #
-# Activity (which atom fields depend on the free parameters) is detected
-# automatically by `probe_activity` — no manual `Inactive` annotations. The
-# probe receives the same `θ_free -> model` builder that is differentiated,
-# so the embedding of free parameters is defined in exactly one place:
+# Inner activity (which inner component fields depend on the free parameters) is detected
+# automatically by `probe_activity` and drives the inner pullback skipping; the outer
+# AR(1) terms are differentiated by Mooncake directly. The probe receives the same
+# `θ_free -> model` builder that is differentiated:
 #   Case 1: ∇ w.r.t. all of θ → b, H, c inactive (θ-independent)
-#   Case 2: ∇ w.r.t. θ[2:3]   → A also inactive (depends on θ only via θ[1])
+#   Case 2: ∇ w.r.t. θ[2:5]   → A also inactive (depends on θ only via θ[1])
 # ─────────────────────────────────────────────────────────────────────────────
 
-using StaticArrays, LinearAlgebra, Random, Printf
+using StaticArrays, LinearAlgebra, Random, Printf, Distributions
+using SSMProblems: StatePrior, LatentDynamics, simulate
+import SSMProblems: distribution, logdensity
 import Mooncake as MC
 
 include("framework.jl")
@@ -19,8 +21,28 @@ include("gradient_analytic.jl")
 include("gradient_mooncake.jl")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Parametric model.  θ = [a, logq, logr]. Inner 2-D linear-Gaussian state
-# conditioned on a scalar outer state `x`.
+# Outer (non-linear, non-Gaussian) latent process: a scalar Gaussian AR(1) with an
+# N(0, 1) prior, expressed via the SSMProblems interface.
+# ─────────────────────────────────────────────────────────────────────────────
+struct NormalPrior{T} <: StatePrior
+    μ::T
+    σ::T
+end
+distribution(p::NormalPrior) = Normal(p.μ, p.σ)
+
+struct AR1{T} <: LatentDynamics
+    φ::T
+    τ::T
+end
+distribution(d::AR1, step::Integer, prev_state) = Normal(d.φ * prev_state, d.τ)
+
+# SSMProblems defines `logdensity` for dynamics/observations but not for priors; add it.
+logdensity(p::StatePrior, x) = logpdf(distribution(p), x)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Parametric model.  θ = [a, logq, logr, φraw, logτ]. Inner 2-D linear-Gaussian state
+# conditioned on a scalar outer state `x` driven by an AR(1).
+#   φ = tanh(φraw), τ = exp(logτ)  outer AR(1) params (θ; enter via the outer log-density)
 #   Q, R                   fixed parametric   (θ only; hoisted → evaluated once)
 #   s = a * x              shared precompute  (θ AND outer)
 #   A = exp(s) * literal   time-varying parametric (shares s)
@@ -32,27 +54,25 @@ include("gradient_mooncake.jl")
 # it enters the forward pass as a θ-independent constant.
 # ─────────────────────────────────────────────────────────────────────────────
 function make_model(θ, dts)
-    a, logq, logr = θ[1], θ[2], θ[3]
+    a, logq, logr, φraw, logτ = θ[1], θ[2], θ[3], θ[4], θ[5]
     Q = exp(logq) * @SMatrix [1.0 0.0; 0.0 1.0]    # fixed parametric
     c = @SVector [0.0]
     R = exp(logr) * SMatrix{1,1}(1.0)
     H = @SMatrix [1.0 0.0]                         # fixed, non-parametric
 
-    prior_fn(x0) = GaussianPrior((@SVector [0.0, 0.0]), (@SMatrix [1.0 0.0; 0.0 1.0]))
+    μ0 = @SVector [0.0, 0.0]
+    Σ0 = @SMatrix [1.0 0.0; 0.0 1.0]
+
     function dyn_fn(x, i)
         s = a * x                                  # shared precompute (θ + outer)
         A = exp(s) * @SMatrix [0.5 0.05; 0.0 0.5]  # time-varying parametric (shares s)
         b = x * @SVector [dts[i], 0.0]             # time-varying non-parametric (control)
         return LinearGaussianDynamics(A, b, Q)
     end
-    function obs_fn(x, i)
-        return LinearGaussianObservation(H, c, R)
-    end
-
     return StateSpaceModel(
-        ConditionalPrior(prior_fn),  # maybe call Hierachical
-        ConditionalDynamics(dyn_fn),
-        ConditionalObservation(obs_fn),  # could actually be `LinearGaussianObservation(H, c, R)`
+        ConditionalPrior(NormalPrior(0.0, 1.0), GaussianPrior(μ0, Σ0)),
+        ConditionalDynamics(AR1(tanh(φraw), exp(logτ)), dyn_fn),  # outer AR(1) parameterized by θ
+        ConditionalObservation(LinearGaussianObservation(H, c, R)),
     )
 end
 
@@ -67,21 +87,29 @@ end
 
 randn_svec(rng, ::Val{D}) where {D} = SVector{D}(ntuple(_ -> randn(rng), D))
 
-function simulate(rng, model, outer)
-    p = model.prior.inner(outer[1])
-    z = p.μ + cholesky(p.Σ).L * randn_svec(rng, Val(length(p.μ)))
+function simulate_data(rng, model, T::Integer)
+    # outer (non-linear) latent trajectory, sampled from the model's outer process
+    outer = Vector{Float64}(undef, T)
+    outer[1] = simulate(rng, model.prior.outer)
+    for t in 2:T
+        outer[t] = simulate(rng, model.dyn.outer, t, outer[t - 1])
+    end
 
-    zs = Vector{typeof(z)}(undef, length(outer))
-    for t in eachindex(outer)
-        d = model.dyn.inner(outer[t], t)
+    # inner (linear-Gaussian) trajectory conditioned on the outer one
+    p = resolve(model.prior.inner, outer[1])
+    z = p.μ + cholesky(p.Σ).L * randn_svec(rng, Val(length(p.μ)))
+    zs = Vector{typeof(z)}(undef, T)
+    for t in 1:T
+        d = resolve(model.dyn.inner, outer[t], t)
         z = d.A * z + d.b + cholesky(d.Q).L * randn_svec(rng, Val(length(z)))
         zs[t] = z
     end
 
-    return map(eachindex(outer)) do t
-        o = model.obs.inner(outer[t], t)
+    ys = map(1:T) do t
+        o = resolve(model.obs.inner, outer[t], t)
         o.H * zs[t] + o.c + cholesky(o.R).L * randn_svec(rng, Val(length(o.c)))
     end
+    return outer, ys
 end
 
 ## FINITE-DIFFERENCE GRADIENT (reference) #####################################
@@ -126,7 +154,6 @@ end
 
 function main()
     T = 30
-    outer = [sin(0.3t) for t in 1:T]            # FIXED outer trajectory (conditioning data)
     dts = [1.0 + 0.5sin(0.5t) for t in 1:T]     # FIXED control sequence (per-step inputs)
 
     # Fix the controls to obtain a builder that is just θ-dependent — this is the
@@ -135,9 +162,10 @@ function main()
         θ -> make_model(θ, dts)
     end
 
-    θ_true = [0.5, -1.0, -1.5]
+    θ_true = [0.5, -1.0, -1.5, atanh(0.9), log(0.3)]  # last two: outer AR(1) φ, τ
     rng = MersenneTwister(20240608)
-    ys = simulate(rng, build(θ_true), outer)
+    # Sample the outer trajectory from the model, then condition on it below.
+    outer, ys = simulate_data(rng, build(θ_true), T)
 
     # 1. FILTERING conditioned on the fixed outer trajectory
     states, ll = run_filter(build(θ_true), outer, ys)
@@ -147,29 +175,31 @@ function main()
     @printf("  final filtered std  : [% .4f, % .4f]\n", sqrt.(diag(states[end].Σ))...)
     @printf("  log-likelihood      : % .6f\n", ll)
 
-    θ0 = [0.3, -0.5, -1.0]
+    θ0 = [0.3, -0.5, -1.0, 1.0, -1.0]
 
-    # Case 1: differentiate w.r.t. all of θ
-    flags = probe_activity(build, θ0, outer[1])
+    # Case 1: differentiate the joint (outer + inner) log-density w.r.t. all of θ — θ
+    # parameterizes both the outer AR(1) and the inner components. Probing is opt-in: without
+    # `with_activity` the model keeps the all-active default (every inner adjoint computed).
+    flags = probe_activity(build, θ0, outer[1], eachindex(outer))
     logL = let vf = Val(flags), build = build
-        θ -> inner_loglik(with_activity(build(θ), vf), outer, ys, kalman_step_analytic)
+        θ -> joint_loglik(with_activity(build(θ), vf), outer, ys, kalman_step_analytic)
     end
     g_mc = mooncake_gradient(logL, θ0)
     report_case("Case 1: ∇ w.r.t. all of θ", flags, θ0, g_mc, central_diff(logL, θ0))
 
-    # Case 2: hold a = θ[1] fixed, differentiate w.r.t. θ[2:3] only. The
+    # Case 2: hold a = θ[1] fixed, differentiate w.r.t. θ[2:5] only. The
     # embedding lives in `build23`, which both the probe and the objective use.
-    θ23 = θ0[2:3]
+    θ23 = θ0[2:5]
     build23 = let a = θ0[1], dts = dts
         θ -> make_model(vcat(a, θ), dts)
     end
-    flags23 = probe_activity(build23, θ23, outer[1])
+    flags23 = probe_activity(build23, θ23, outer[1], eachindex(outer))
     logL23 = let vf = Val(flags23), build = build23
-        θ -> inner_loglik(with_activity(build(θ), vf), outer, ys, kalman_step_analytic)
+        θ -> joint_loglik(with_activity(build(θ), vf), outer, ys, kalman_step_analytic)
     end
     g23_mc = mooncake_gradient(logL23, θ23)
     return report_case(
-        "Case 2: ∇ w.r.t. θ[2:3] (a fixed)", flags23, θ23, g23_mc, central_diff(logL23, θ23)
+        "Case 2: ∇ w.r.t. θ[2:5] (a fixed)", flags23, θ23, g23_mc, central_diff(logL23, θ23)
     )
 end
 
