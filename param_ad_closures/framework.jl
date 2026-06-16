@@ -103,6 +103,18 @@ struct StateSpaceModel{P,D,O}
     obs::O
 end
 
+## COMPONENT RESOLUTION ########################################################
+# A conditional component (prior, dynamics, or observation) is supplied either
+# as a plain value (constant in the outer state and time) or as a closure
+# `(x, t) -> value`. `resolve` unifies the two at the call site, so the filter
+# loop never has to know which form was given. The prior closure takes only the
+# initial outer state.
+
+resolve(f::Function, x, t) = f(x, t)
+resolve(component, x, t) = component
+resolve(f::Function, x0) = f(x0)
+resolve(component, x0) = component
+
 ## ACTIVITY STAMPING ###########################################################
 # `with_activity` composes each conditional closure with `_reflag`, which
 # re-stamps the activity type parameters of the atom it builds. This lets
@@ -111,11 +123,11 @@ end
 # annotations and without changing any call site: the wrapped closure still
 # sits in the `inner` field.
 
-"Callable composing an atom-building closure with an activity re-stamp."
-struct Reflagged{F,flags}
+"Callable composing a component (closure or constant) with an activity re-stamp."
+struct Reflagged{F,flags} <: Function
     f::F
 end
-(r::Reflagged{F,flags})(x, i) where {F,flags} = _reflag(r.f(x, i), Val(flags))
+(r::Reflagged{F,flags})(x, i) where {F,flags} = _reflag(resolve(r.f, x, i), Val(flags))
 
 function _reflag(d::LinearGaussianDynamics, ::Val{flags}) where {flags}
     return LinearGaussianDynamics{typeof(d.A),typeof(d.b),typeof(d.Q),flags...}(
@@ -187,12 +199,12 @@ fixed `outer` trajectory — the scalar differentiated w.r.t. θ. `step` selects
 Kalman step implementation.
 """
 function inner_loglik(model::StateSpaceModel, outer, ys, step=kalman_step)
-    p = model.prior.inner(outer[1])
+    p = resolve(model.prior.inner, outer[1])
     state = Gaussian(p.μ, p.Σ)
     ll = zero(eltype(p.μ))
     for t in eachindex(ys)
-        dyn = model.dyn.inner(outer[t], t)
-        obs = model.obs.inner(outer[t], t)
+        dyn = resolve(model.dyn.inner, outer[t], t)
+        obs = resolve(model.obs.inner, outer[t], t)
         state, inc = step(state, dyn, obs, ys[t])
         ll += inc
     end
@@ -201,13 +213,13 @@ end
 
 "As `inner_loglik`, but also returns the sequence of filtered Gaussians."
 function run_filter(model::StateSpaceModel, outer, ys)
-    p = model.prior.inner(outer[1])
+    p = resolve(model.prior.inner, outer[1])
     state = Gaussian(p.μ, p.Σ)
     states = [state]
     ll = zero(eltype(p.μ))
     for t in eachindex(ys)
-        dyn = model.dyn.inner(outer[t], t)
-        obs = model.obs.inner(outer[t], t)
+        dyn = resolve(model.dyn.inner, outer[t], t)
+        obs = resolve(model.obs.inner, outer[t], t)
         state, inc = kalman_step(state, dyn, obs, ys[t])
         push!(states, state)
         ll += inc

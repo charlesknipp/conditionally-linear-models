@@ -38,21 +38,19 @@ function make_model(θ, dts)
     R = exp(logr) * SMatrix{1,1}(1.0)
     H = @SMatrix [1.0 0.0]                         # fixed, non-parametric
 
-    prior_fn(x0) = GaussianPrior((@SVector [0.0, 0.0]), (@SMatrix [1.0 0.0; 0.0 1.0]))
+    μ0 = @SVector [0.0, 0.0]
+    Σ0 = @SMatrix [1.0 0.0; 0.0 1.0]
+
     function dyn_fn(x, i)
         s = a * x                                  # shared precompute (θ + outer)
         A = exp(s) * @SMatrix [0.5 0.05; 0.0 0.5]  # time-varying parametric (shares s)
         b = x * @SVector [dts[i], 0.0]             # time-varying non-parametric (control)
         return LinearGaussianDynamics(A, b, Q)
     end
-    function obs_fn(x, i)
-        return LinearGaussianObservation(H, c, R)
-    end
-
     return StateSpaceModel(
-        ConditionalPrior(prior_fn),  # maybe call Hierachical
+        ConditionalPrior(GaussianPrior(μ0, Σ0)),
         ConditionalDynamics(dyn_fn),
-        ConditionalObservation(obs_fn),  # could actually be `LinearGaussianObservation(H, c, R)`
+        ConditionalObservation(LinearGaussianObservation(H, c, R)),
     )
 end
 
@@ -68,18 +66,18 @@ end
 randn_svec(rng, ::Val{D}) where {D} = SVector{D}(ntuple(_ -> randn(rng), D))
 
 function simulate(rng, model, outer)
-    p = model.prior.inner(outer[1])
+    p = resolve(model.prior.inner, outer[1])
     z = p.μ + cholesky(p.Σ).L * randn_svec(rng, Val(length(p.μ)))
 
     zs = Vector{typeof(z)}(undef, length(outer))
     for t in eachindex(outer)
-        d = model.dyn.inner(outer[t], t)
+        d = resolve(model.dyn.inner, outer[t], t)
         z = d.A * z + d.b + cholesky(d.Q).L * randn_svec(rng, Val(length(z)))
         zs[t] = z
     end
 
     return map(eachindex(outer)) do t
-        o = model.obs.inner(outer[t], t)
+        o = resolve(model.obs.inner, outer[t], t)
         o.H * zs[t] + o.c + cholesky(o.R).L * randn_svec(rng, Val(length(o.c)))
     end
 end

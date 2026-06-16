@@ -51,8 +51,8 @@ function probe_activity(build, θ_free, x_sample)
         m = build(v[1:nf])
         # Index 1 is a representative time step. Assumes θ-dependence doesn't branch on time
         # step. I guess we could also probe this like we probe the outer state?
-        d = m.dyn.inner(x, 1)
-        o = m.obs.inner(x, 1)
+        d = resolve(m.dyn.inner, x, 1)
+        o = resolve(m.obs.inner, x, 1)
         return [sum(d.A), sum(d.b), sum(d.Q), sum(o.H), sum(o.c), sum(o.R)]
     end
     J = try
