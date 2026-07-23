@@ -1,14 +1,18 @@
 using Distributions
+using FastGaussQuadrature
 using SSMProblems
 using LinearAlgebra
+using LogExpFunctions
 using PDMats
 using Printf
 using Random
 using StaticArrays
+using StatsBase
 
-include("kalman_filter.jl")
 include("linear_gaussian.jl")
 include("conditional.jl")
+include("filter_algos.jl")
+
 include("activity_tracer.jl")
 
 ## STATIC ARRAY SUPPORT ####################################################################

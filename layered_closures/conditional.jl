@@ -98,7 +98,7 @@ function SSMProblems.logdensity(
     observation::ConditionalObservation, iter::Integer, state, data; kwargs...
 )
     return SSMProblems.logdensity(
-        observation.inner_process(prev_state.x, iter; kwargs...),
+        observation.inner_process(state.x, iter; kwargs...),
         iter,
         state.z,
         data;

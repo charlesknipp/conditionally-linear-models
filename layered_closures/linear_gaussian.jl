@@ -32,10 +32,6 @@ function SSMProblems.distribution(prior::GaussianPrior; kwargs...)
     return MvNormal(prior.μ, prior.Σ)
 end
 
-function initialize(rng::AbstractRNG, prior::GaussianPrior, ::KalmanFilter; kwargs...)
-    return GaussianState(prior.μ, prior.Σ)
-end
-
 """
     LinearGaussianDynamics
 
@@ -62,16 +58,12 @@ function SSMProblems.distribution(
     return MvNormal(A * state + b, Q)
 end
 
-function predict(
-    rng::AbstractRNG,
-    dynamics::LinearGaussianDynamics,
-    algo::KalmanFilter,
-    iter::Integer,
-    state::GaussianState;
-    kwargs...
+function Statistics.mean(
+    dynamics::LinearGaussianDynamics, iter::Integer, state; kwargs...
 )
-    A, b, Q = fetch_parameters(dynamics, iter; kwargs...)
-    return kalman_predict(state.μ, state.Σ, A, b, Q)
+    A = compute_parameter(dynamics.A, iter; kwargs...)
+    b = compute_parameter(dynamics.b, iter; kwargs...)
+    return A * state + b
 end
 
 """
@@ -98,16 +90,4 @@ function SSMProblems.distribution(
 )
     H, c, R = fetch_parameters(observation, iter; kwargs...)
     return MvNormal(H * state + c, R)
-end
-
-function update(
-    observation::LinearGaussianObservation,
-    algo::KalmanFilter,
-    iter::Integer,
-    state::GaussianState,
-    data;
-    kwargs...
-)
-    H, c, R = fetch_parameters(observation, iter; kwargs...)
-    return kalman_update(state.μ, state.Σ, H, c, R, data)
 end
