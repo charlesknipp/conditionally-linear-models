@@ -17,18 +17,11 @@ function SSMProblems.simulate(rng::AbstractRNG, prior::ConditionalPrior; kwargs.
     return (; x, z)
 end
 
-# # TODO: just noticed we don't define logdensity on a StatePrior in SSMProblems
-# function SSMProblems.logdensity(prior::ConditionalPrior, state; kwargs...)
-#     outer_logprob = SSMProblems.logdensity(prior.outer_process, iter, state.x; kwargs...)
-#     inner_logprob = SSMProblems.logdensity(
-#         prior.inner_process(state.x; kwargs...), iter, state.z; kwargs...
-#     )
-#     return outer_logprob + inner_logprob
-# end
-
-function initialize(rng::AbstractRNG, prior::ConditionalPrior; kwargs...)
+function initialize(
+    rng::AbstractRNG, prior::ConditionalPrior, algo::KalmanFilter; kwargs...
+)
     x = SSMProblems.simulate(rng, prior.outer_process; kwargs...)
-    z = analytic_initialize(prior.inner_process(x; kwargs...); kwargs...)
+    z = initialize(rng, prior.inner_process(x; kwargs...), algo; kwargs...)
     return (; x, z)
 end
 
@@ -70,11 +63,16 @@ function SSMProblems.logdensity(
 end
 
 function predict(
-    rng::AbstractRNG, dynamics::ConditionalDynamics, iter::Integer, state; kwargs...
+    rng::AbstractRNG,
+    dynamics::ConditionalDynamics,
+    algo::KalmanFilter,
+    iter::Integer,
+    state;
+    kwargs...
 )
     x = SSMProblems.simulate(rng, dynamics.outer_process, iter, state.x; kwargs...)
-    z = analytic_predict(
-        dynamics.inner_process(x, iter; kwargs...), iter, state.z; kwargs...
+    z = predict(
+        rng, dynamics.inner_process(x, iter; kwargs...), algo, iter, state.z; kwargs...
     )
     return (; x, z)
 end
@@ -108,9 +106,21 @@ function SSMProblems.logdensity(
     )
 end
 
-function update(observation::ConditionalObservation, iter::Integer, state, data; kwargs...)
-    z, log_likelihood = analytic_update(
-        observation.inner_process(state.x, iter; kwargs...), iter, state.z, data; kwargs...
+function update(
+    observation::ConditionalObservation,
+    algo::KalmanFilter,
+    iter::Integer,
+    state,
+    data;
+    kwargs...
+)
+    z, log_likelihood = update(
+        observation.inner_process(state.x, iter; kwargs...),
+        algo,
+        iter,
+        state.z,
+        data;
+        kwargs...
     )
     return (; x=state.x, z), log_likelihood
 end

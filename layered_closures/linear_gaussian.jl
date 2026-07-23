@@ -5,6 +5,8 @@ compute_parameter(param::Function, args...; kwargs...) = param(args...; kwargs..
 
 ## LINEAR GAUSSIAN PROCESSES ###############################################################
 
+struct KalmanFilter end
+
 """
     GaussianPrior
 
@@ -15,12 +17,23 @@ struct GaussianPrior{MT,ΣT} <: StatePrior
     Σ::ΣT
 end
 
+"""
+    GaussianState{μT,ΣT}
+
+Represents a Gaussian distribution state with mean μ and covariance Σ.
+Used to represent filtered/predicted state distributions.
+"""
+struct GaussianState{μT,ΣT}
+    μ::μT
+    Σ::ΣT
+end
+
 function SSMProblems.distribution(prior::GaussianPrior; kwargs...)
     return MvNormal(prior.μ, prior.Σ)
 end
 
-function analytic_initialize(prior::GaussianPrior; kwargs...)
-    return (prior.μ, prior.Σ)
+function initialize(rng::AbstractRNG, prior::GaussianPrior, ::KalmanFilter; kwargs...)
+    return GaussianState(prior.μ, prior.Σ)
 end
 
 """
@@ -49,9 +62,16 @@ function SSMProblems.distribution(
     return MvNormal(A * state + b, Q)
 end
 
-function analytic_predict(dynamics::LinearGaussianDynamics, iter::Integer, state; kwargs...)
+function predict(
+    rng::AbstractRNG,
+    dynamics::LinearGaussianDynamics,
+    algo::KalmanFilter,
+    iter::Integer,
+    state::GaussianState;
+    kwargs...
+)
     A, b, Q = fetch_parameters(dynamics, iter; kwargs...)
-    return kalman_predict(state[1], state[2], A, b, Q)
+    return kalman_predict(state.μ, state.Σ, A, b, Q)
 end
 
 """
@@ -80,9 +100,14 @@ function SSMProblems.distribution(
     return MvNormal(H * state + c, R)
 end
 
-function analytic_update(
-    observation::LinearGaussianObservation, iter::Integer, state, data; kwargs...
+function update(
+    observation::LinearGaussianObservation,
+    algo::KalmanFilter,
+    iter::Integer,
+    state::GaussianState,
+    data;
+    kwargs...
 )
     H, c, R = fetch_parameters(observation, iter; kwargs...)
-    return kalman_update(state[1], state[2], H, c, R, data)
+    return kalman_update(state.μ, state.Σ, H, c, R, data)
 end

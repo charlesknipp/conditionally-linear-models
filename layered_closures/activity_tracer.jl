@@ -32,8 +32,8 @@ function probe_activity(build, θ_free, process::Symbol; kwargs...)
     rng = Random.default_rng()
     J = jacobian_sparsity(θ_free, TracerLocalSparsityDetector()) do θ
         model = build(θ)
-        state = initialize(rng, model.prior; kwargs...)
-        new_state = predict(rng, model.dyn, 1, state; kwargs...)
+        state = initialize(rng, model.prior, KalmanFilter(); kwargs...)
+        new_state = predict(rng, model.dyn, KalmanFilter(), 1, state; kwargs...)
         return parameter_sparsity(getproperty(model, process), new_state; kwargs...)
     end
     return Tuple(any(r) for r in eachrow(J))

@@ -81,7 +81,7 @@ end
 ## CONTROLLED LINEAR GAUSSIAN CASE #########################################################
 
 # I haven't thought through the linear Gaussian model with controls yet...
-function linear_dynamics(a::AT, logσ::ΣT) where {AT<:Real,ΣT<:Real}
+function linear_dynamics(a::AT, logσ::Real) where {AT<:Real}
     Q = exp(logσ) * @SMatrix [1.0 0.0; 0.0 1.0]
     A(iter; controls, kwargs...) = exp(a * controls[iter]) * @SMatrix [0.5 0.05; 0.0 0.5]
     b(iter; controls, kwargs...) = controls[iter] * @SVector [1.0, 0.0]
@@ -89,7 +89,7 @@ function linear_dynamics(a::AT, logσ::ΣT) where {AT<:Real,ΣT<:Real}
 end
 
 # no closure necessary here
-function linear_observation(logσ::ΣT) where {ΣT<:Real}
+function linear_observation(logσ::Real)
     H = @SMatrix [1.0 0.0]
     c = @SVector [0.0]
     R = exp(logσ) * SMatrix{1,1}(1.0)
@@ -110,16 +110,16 @@ end
 print_gaussian_state(state::NamedTuple{(:x, :z)}) = print_gaussian_state(state.z)
 
 function print_gaussian_state(state)
-    format = join(fill("% .4f", length(state[1])), ", ")
-    myprintf("  final filtered mean : [$format]\n", state[1]...)
-    return myprintf("  final filtered std  : [$format]\n", sqrt.(diag(state[2]))...)
+    format = join(fill("% .4f", length(state.μ)), ", ")
+    myprintf("  final filtered mean : [$format]\n", state.μ...)
+    return myprintf("  final filtered std  : [$format]\n", sqrt.(diag(state.Σ))...)
 end
 
 myprintf(text::String, args...) = Printf.format(stdout, Printf.Format(text), args...)
 
 function main(rng::AbstractRNG, T::Integer, model::AbstractStateSpaceModel; kwargs...)
     _, _, ys = sample(rng, model, T; kwargs...)
-    states, ll = filter(rng, model, ys; kwargs...)
+    states, ll = filter(rng, model, KalmanFilter(), ys; kwargs...)
 
     println("── Filtering (conditioned on fixed outer trajectory) ──")
     @printf("  steps               : %d\n", T)

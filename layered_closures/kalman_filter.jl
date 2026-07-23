@@ -1,7 +1,7 @@
 ## KALMAN PREDICT / UPDATE #################################################################
 
 function kalman_predict(μ, Σ, A, b, Q)
-    return (A * μ + b, A * Σ * A' + Q)
+    return GaussianState(A * μ + b, A * Σ * A' + Q)
 end
 
 function kalman_update(μ, Σ, H, c, R, y)
@@ -9,34 +9,22 @@ function kalman_update(μ, Σ, H, c, R, y)
     z = y - m
     S = H * Σ * H' + R
     K = Σ * H' / S
-    return (μ + K * z, Σ - K * H * Σ), loglikelihood(z, S)
+    return GaussianState(μ + K * z, Σ - K * H * Σ), loglikelihood(z, S)
 end
 
-function initialize(rng::AbstractRNG, prior::StatePrior; kwargs...)
-    return analytic_initialize(prior; kwargs...)
+function step(rng::AbstractRNG, model::StateSpaceModel, algo, iter, state, data; kwargs...)
+    pred_state = predict(rng, model.dyn, algo, iter, state; kwargs...)
+    return update(model.obs, algo, iter, pred_state, data; kwargs...)
 end
 
-function predict(
-    rng::AbstractRNG, dynamics::LatentDynamics, iter::Integer, state; kwargs...
+function filter(
+    rng::AbstractRNG, model::StateSpaceModel, algo, data; kwargs...
 )
-    return analytic_predict(dynamics, iter, state; kwargs...)
-end
-
-function update(observation::ObservationProcess, iter::Integer, state, data; kwargs...)
-    return analytic_update(observation, iter, state, data)
-end
-
-function step(rng::AbstractRNG, model::StateSpaceModel, iter, state, data; kwargs...)
-    pred_state = predict(rng, model.dyn, iter, state; kwargs...)
-    return update(model.obs, iter, pred_state, data; kwargs...)
-end
-
-function filter(rng::AbstractRNG, model::StateSpaceModel, data; kwargs...)
-    init_state = initialize(rng, model.prior; kwargs...)
-    state, ll = step(rng, model, 1, init_state, data[1]; kwargs...)
+    init_state = initialize(rng, model.prior, algo; kwargs...)
+    state, ll = step(rng, model, algo, 1, init_state, data[1]; kwargs...)
     states = [state]
-    for t in 2:length(data)
-        state, ll_increment = step(rng, model, t, state, data[t]; kwargs...)
+    for t in 2:lastindex(data)
+        state, ll_increment = step(rng, model, algo, t, state, data[t]; kwargs...)
         push!(states, state)
         ll += ll_increment
     end
