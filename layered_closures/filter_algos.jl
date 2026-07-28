@@ -36,7 +36,10 @@ end
 
 struct BootstrapFilter
     N::Int
+    threshold::Float64
 end
+
+BootstrapFilter(N::Int) = BootstrapFilter(N, 0.5)
 
 struct Particle{PT,WT}
     value::PT
@@ -48,7 +51,7 @@ Particle(value::VT) where {VT} = Particle{VT,Float64}(value, 0.0)
 update_weight(state::Particle, num) = Particle(state.value, state.log_weight + num)
 update_weight(particles::Vector{<:Particle}, nums) = map((p, n) -> update_weight(p, n), particles, nums)
 log_weights(particles::Vector{<:Particle}) = getproperty.(particles, :log_weight)
-StatsBase.weights(particles::Vector{<:Particle}) = softmax(log_weights(particles))
+StatsBase.weights(particles::Vector{<:Particle}) = Weights(softmax(log_weights(particles)))
 
 function initialize(rng::AbstractRNG, prior::StatePrior, algo::BootstrapFilter; kwargs...)
     return [Particle(SSMProblems.simulate(rng, prior; kwargs...)) for _ in 1:algo.N]
@@ -85,10 +88,10 @@ function update(
     return update_weight(state, log_increments), log_marginal
 end
 
-function resample(rng::AbstractRNG, state::Vector{<:Particle}, n::Integer)
+function resample(rng::AbstractRNG, state::Vector{<:Particle}, algo::BootstrapFilter)
     weights = StatsBase.weights(state)
-    if inv(sum(abs2, weights)) <= 0.5 * n
-        indices = StatsBase.sample(rng, 1:n, StatsBase.Weights(weights), n)
+    if inv(sum(abs2, weights)) <= algo.threshold * algo.N
+        indices = StatsBase.sample(rng, 1:algo.N, StatsBase.Weights(weights), algo.N)
         return Particle.(getproperty.(state[indices], :value))
     else
         return state
@@ -104,7 +107,7 @@ function step(
     data;
     kwargs...
 )
-    state = resample(rng, state, algo.N)
+    state = resample(rng, state, algo)
     pred_state = predict(rng, model.dyn, algo, iter, state; kwargs...)
     return update(model.obs, algo, iter, pred_state, data; kwargs...)
 end

@@ -58,14 +58,6 @@ function SSMProblems.distribution(
     return MvNormal(A * state + b, Q)
 end
 
-function Statistics.mean(
-    dynamics::LinearGaussianDynamics, iter::Integer, state; kwargs...
-)
-    A = compute_parameter(dynamics.A, iter; kwargs...)
-    b = compute_parameter(dynamics.b, iter; kwargs...)
-    return A * state + b
-end
-
 """
     LinearGaussianObservation
 

@@ -48,7 +48,7 @@ function diagnostic(rng::AbstractRNG, model, algo, data, true_states; kwargs...)
     states, log_evidence = filter(rng, model, algo, data; kwargs...)
     rmse = compute_rmse(states, true_states)
     metrics = compute_metrics(algo, states, data, model; kwargs...)
-    return DiagnosticReport(rmse, log_evidence, metrics)
+    return DiagnosticReport(rmse, log_evidence, metrics), states
 end
 
 ## RMSE COMPUTATION ########################################################################

@@ -1,5 +1,10 @@
 ## CONDITIONAL PROCESSES ###################################################################
 
+struct HierarchicalState{XT,ZT}
+    x::XT
+    z::ZT
+end
+
 """
     ConditionalPrior
 
@@ -14,7 +19,7 @@ end
 function SSMProblems.simulate(rng::AbstractRNG, prior::ConditionalPrior; kwargs...)
     x = SSMProblems.simulate(rng, prior.outer_process; kwargs...)
     z = SSMProblems.simulate(rng, prior.inner_process(x; kwargs...); kwargs...)
-    return (; x, z)
+    return HierarchicalState(x, z)
 end
 
 function initialize(
@@ -22,7 +27,7 @@ function initialize(
 )
     x = SSMProblems.simulate(rng, prior.outer_process; kwargs...)
     z = initialize(rng, prior.inner_process(x; kwargs...), algo; kwargs...)
-    return (; x, z)
+    return HierarchicalState(x, z)
 end
 
 """
@@ -43,7 +48,7 @@ function SSMProblems.simulate(
     z = SSMProblems.simulate(
         rng, dynamics.inner_process(x, iter; kwargs...), iter, state.z; kwargs...
     )
-    return (; x, z)
+    return HierarchicalState(x, z)
 end
 
 function SSMProblems.logdensity(
@@ -74,7 +79,7 @@ function predict(
     z = predict(
         rng, dynamics.inner_process(x, iter; kwargs...), algo, iter, state.z; kwargs...
     )
-    return (; x, z)
+    return HierarchicalState(x, z)
 end
 
 """
@@ -122,5 +127,5 @@ function update(
         data;
         kwargs...
     )
-    return (; x=state.x, z), log_likelihood
+    return HierarchicalState(state.x, z), log_likelihood
 end
