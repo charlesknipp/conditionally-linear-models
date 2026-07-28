@@ -6,6 +6,18 @@ struct HierarchicalState{XT,ZT}
 end
 
 """
+    JointGaussianState
+
+Similar to HierarchicalState, with the addition of the cross covariance term for accurate
+updates in the quadrature filter.
+"""
+struct JointGaussianState{XT,ZT,CT}
+    x::XT
+    z::ZT
+    Σxz::CT
+end
+
+"""
     ConditionalPrior
 
 - `outer_process` is a non-gaussian distribution

@@ -43,16 +43,61 @@ end
 
 ## RAO-BLACKWELLISED QUADRATURE FILTER ####################################################
 
-function initialize(::AbstractRNG, prior::ConditionalPrior, algo::QuadratureFilter; kwargs...)
-    init_x = GaussianState(prior.outer_process.μ, prior.outer_process.Σ)
-    points, weights = sigma_points(init_x, algo)
+"""
+    condition(state::JointGaussianState, xi)
 
-    inner_states = map(points) do x
-        inner_prior = prior.inner_process(x; kwargs...)
+Conditional inner prior `z | x = xᵢ` from the joint Gaussian — the term the naive RBPF-style
+update drops. With `K = Σzx Σxx⁻¹`,
+
+    m = μz + K (xᵢ - μx),    C = Σzz - K Σxz     (Schur complement).
+
+Reduces to the shared marginal `state.z` exactly when `Σxz = 0`.
+"""
+function condition(state::JointGaussianState, xi)
+    K = (state.x.Σ \ state.Σxz)'
+    μ = state.z.μ + K * (xi - state.x.μ)
+    Σ = state.z.Σ - K * state.Σxz
+    return GaussianState(μ, Σ)
+end
+
+"""
+    cross_cov(xs, zs, μx, μz, w)
+
+Between-node cross covariance `Σ wᵢ (xᵢ - μx)(zᵢ - μz)'`, the piece of the law of total
+covariance that couples the outer and inner states.
+"""
+function cross_cov(xs, zs, μx, μz, w::AbstractWeights)
+    return mapreduce(+, xs, zs, w) do x, z, wi
+        wi * (x - μx) * (z - μz)'
+    end
+end
+
+# Collapse weighted outer/inner nodes into a joint Gaussian. The marginals reuse the existing
+# `mean_and_cov` (within + between); only the cross term is new. `outer` may be a cloud of
+# `GaussianState`s (predict, carries process noise) or raw sigma points (update, deterministic).
+function joint_state(outer, inner::AbstractVector{<:GaussianState}, w::AbstractVector)
+    w = StatsBase.weights(w)
+    x = StatsBase.mean_and_cov(outer, w)
+    z = StatsBase.mean_and_cov(inner, w)
+    Σxz = cross_cov(_node_means(outer), getproperty.(inner, :μ), x.μ, z.μ, w)
+    return JointGaussianState(x, z, Σxz)
+end
+
+_node_means(outer::AbstractVector{<:GaussianState}) = getproperty.(outer, :μ)
+_node_means(points::AbstractVector{<:AbstractVector}) = points
+
+function initialize(::AbstractRNG, prior::ConditionalPrior, algo::QuadratureFilter; kwargs...)
+    x = GaussianState(prior.outer_process.μ, prior.outer_process.Σ)
+    points, weights = sigma_points(x, algo)
+
+    inner_states = map(points) do xi
+        inner_prior = prior.inner_process(xi; kwargs...)
         GaussianState(inner_prior.μ, inner_prior.Σ)
     end
 
-    return HierarchicalState(init_x, StatsBase.mean_and_cov(inner_states, weights))
+    z = StatsBase.mean_and_cov(inner_states, weights)
+    # prior factorizes p(x, z) = p(x) p(z | x) with independent marginals ⇒ Σxz = 0
+    return JointGaussianState(x, z, zero(x.μ * z.μ'))
 end
 
 function predict(
@@ -60,51 +105,43 @@ function predict(
     dynamics::ConditionalDynamics,
     algo::QuadratureFilter,
     iter,
-    state;
+    state::JointGaussianState;
     kwargs...
 )
     points, weights = sigma_points(state.x, algo)
 
-    # Deterministically transform outer sigma points
     outer_states = map(points) do x
         dist = SSMProblems.distribution(dynamics.outer_process, iter, x)
         GaussianState(mean(dist), cov(dist))
     end
 
-    # Predict inner states conditioned on transformed outer points
     inner_states = map(outer_states) do x
         inner_dyn = dynamics.inner_process(x.μ, iter; kwargs...)
-        predict(rng, inner_dyn, KalmanFilter(), iter, state.z; kwargs...)
+        predict(rng, inner_dyn, KalmanFilter(), iter, condition(state, x.μ); kwargs...)
     end
 
-    # Compute statistics from transformed points
-    x = StatsBase.mean_and_cov(outer_states, weights)
-    z = StatsBase.mean_and_cov(inner_states, weights)
-    return HierarchicalState(x, z)
+    return joint_state(outer_states, inner_states, weights)
 end
 
 function update(
     observation::ConditionalObservation,
     algo::QuadratureFilter,
     iter,
-    state,
+    state::JointGaussianState,
     data;
     kwargs...
 )
     points, weights = sigma_points(state.x, algo)
 
-    # TODO: double check that this is correct, may need to use the cross covariance here
     results = map(eachindex(weights)) do i
         inner_obs = observation.inner_process(points[i], iter; kwargs...)
-        z, ll = update(inner_obs, KalmanFilter(), iter, state.z, data; kwargs...)
+        z, ll = update(
+            inner_obs, KalmanFilter(), iter, condition(state, points[i]), data; kwargs...
+        )
         (z, log(weights[i]) + ll)
     end
 
-    updated_states = map(r -> r[1], results)
-    log_weights = map(r -> r[2], results)
-
+    log_weights = map(last, results)
     weights = softmax(log_weights)
-    x = StatsBase.mean_and_cov(points, weights)
-    z = StatsBase.mean_and_cov(updated_states, weights)
-    return HierarchicalState(x, z), logsumexp(log_weights)
+    return joint_state(points, map(first, results), weights), logsumexp(log_weights)
 end

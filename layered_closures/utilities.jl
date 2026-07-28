@@ -55,6 +55,15 @@ StatsBase.mean(state::HierarchicalState) = HierarchicalState(mean(state.x), mean
 StatsBase.var(state::HierarchicalState) = HierarchicalState(var(state.x), var(state.z))
 StatsBase.cov(state::HierarchicalState) = HierarchicalState(cov(state.x), cov(state.z))
 
+## JOINT GAUSSIAN STATE (single distribution) ##############################################
+#
+# Present the joint posterior as a HierarchicalState of its marginals so the existing
+# `cat`/`FilterSummary` plotting path is unchanged; the cross covariance Σxz is internal to
+# the quadrature filter's conditioning and is not needed for the marginal summaries.
+
+StatsBase.mean(state::JointGaussianState) = HierarchicalState(mean(state.x), mean(state.z))
+StatsBase.var(state::JointGaussianState) = HierarchicalState(var(state.x), var(state.z))
+
 ## WEIGHTED POINT CLOUDS ###################################################################
 #
 # A collection of samples (each a vector) plus weights. We hand the reinterpreted matrix

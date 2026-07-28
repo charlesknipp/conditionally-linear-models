@@ -53,8 +53,8 @@ function conditional_prior(σ²::T) where {T<:Real}
 end
 
 # closes over A and b
-function conditional_dynamics(σ²::T) where {T<:Real}
-    A = ones(SMatrix{1,1,T})
+function conditional_dynamics(ρ::T, σ²::T) where {T<:Real}
+    A = ρ * ones(SMatrix{1,1,T})
     b = zeros(SVector{1,T})
     Q = PDMat(SMatrix{1,1,T}(σ²))
     function inner_process(state, iter; kwargs...)
@@ -75,22 +75,22 @@ function conditional_observation(::Type{T}) where {T<:Real}
 end
 
 # generate the whole model
-function stochastic_volatility_model(γ::T, σ²::T) where {T<:Real}
+function stochastic_volatility_model(γ::T, σ²::T, ρ::T) where {T<:Real}
     return StateSpaceModel(
         ConditionalPrior(
             GaussianPrior(zeros(SVector{1,T}), PDMat(SMatrix{1,1,T}(I))),
             conditional_prior(σ²)
         ),
-        ConditionalDynamics(random_walk(γ), conditional_dynamics(σ²)),
+        ConditionalDynamics(random_walk(γ), conditional_dynamics(ρ, σ²)),
         ConditionalObservation(conditional_observation(T)),
     )
 end
 
 ## FILTERING COMPARISON ####################################################################
 
-model = stochastic_volatility_model(0.05, 0.0001)
+model = stochastic_volatility_model(0.05, 0.1, 0.7)
 rng = MersenneTwister(123)
-_, true_states, ys = sample(rng, model, 100)
+_, true_states, ys = sample(rng, model, 100);
 
 println("\n\n[Quadrature Filter (N=4)]")
 qf_states, _ = filter(rng, model, QuadratureFilter(4), ys);
