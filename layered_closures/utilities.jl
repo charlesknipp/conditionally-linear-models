@@ -109,14 +109,17 @@ end
 # Particles carry their own log weights, so the public API takes no weights argument: we
 # recover the normalized weights internally and forward the values to the weighted methods.
 
-StatsBase.mean(particles::AbstractVector{<:Particle}) =
+function StatsBase.mean(particles::AbstractVector{<:Particle})
     StatsBase.mean(getproperty.(particles, :value), StatsBase.weights(particles))
+end
 
-StatsBase.var(particles::AbstractVector{<:Particle}) =
+function StatsBase.var(particles::AbstractVector{<:Particle})
     StatsBase.var(getproperty.(particles, :value), StatsBase.weights(particles))
+end
 
-StatsBase.cov(particles::AbstractVector{<:Particle}) =
+function StatsBase.cov(particles::AbstractVector{<:Particle})
     StatsBase.cov(getproperty.(particles, :value), StatsBase.weights(particles))
+end
 
 ## GAUSSIAN MIXTURES (Rao-Blackwellised) ###################################################
 #
@@ -136,27 +139,32 @@ function StatsBase.mean_and_cov(states::AbstractVector{<:GaussianState}, w::Abst
 
     μ = StatsBase.mean(μs, w)
     within = StatsBase.mean(Σs, w)                                  # Σ wᵢ Σᵢ
-    between = _rebuild_matrix(μs, StatsBase.cov(dense_sample_matrix(μs), w, 2; corrected=false))
+    between = _rebuild_matrix(
+        μs, StatsBase.cov(dense_sample_matrix(μs), w, 2; corrected=false)
+    )
     return GaussianState(μ, within + between)
 end
 
 # A raw weighted point cloud collapses to a single Gaussian by its weighted moments.
-function StatsBase.mean_and_cov(points::AbstractVector{<:AbstractVector}, w::AbstractWeights)
+function StatsBase.mean_and_cov(
+    points::AbstractVector{<:AbstractVector}, w::AbstractWeights
+)
     return GaussianState(StatsBase.mean(points, w), StatsBase.cov(points, w))
 end
 
 # accept a raw weight vector for convenience (matches the quadrature filter call sites)
-StatsBase.mean_and_cov(states::AbstractVector{<:GaussianState}, w::AbstractVector) =
+function StatsBase.mean_and_cov(states::AbstractVector{<:GaussianState}, w::AbstractVector)
     StatsBase.mean_and_cov(states, StatsBase.weights(w))
-StatsBase.mean_and_cov(points::AbstractVector{<:AbstractVector}, w::AbstractVector) =
+end
+function StatsBase.mean_and_cov(points::AbstractVector{<:AbstractVector}, w::AbstractVector)
     StatsBase.mean_and_cov(points, StatsBase.weights(w))
+end
 
 ## EXTRACT STATISTICS FOR PLOTTING #########################################################
 
 function Base.cat(states::Vector{<:HierarchicalState})
     return HierarchicalState(
-        sample_matrix(getproperty.(states, :x)),
-        sample_matrix(getproperty.(states, :z))
+        sample_matrix(getproperty.(states, :x)), sample_matrix(getproperty.(states, :z))
     )
 end
 
@@ -188,7 +196,9 @@ end
 ## TIME SERIES PLOTTING ####################################################################
 
 # A single mean trajectory with a shaded ±nσ credible band.
-function plot_band!(ax, t, μ::AbstractVector, σ::AbstractVector; color, label, linewidth, nσ=2)
+function plot_band!(
+    ax, t, μ::AbstractVector, σ::AbstractVector; color, label, linewidth, nσ=2
+)
     band!(ax, t, μ .- nσ .* σ, μ .+ nσ .* σ; color=(color, 0.3))
     lines!(ax, t, μ; color, linewidth, label)
     return ax
@@ -202,8 +212,14 @@ Overlay one component (`comp`) of a state `field` (`:x` or `:z`) across every fi
 is supplied, its trajectory is drawn underneath in black.
 """
 function plot_field!(
-    ax, t, summaries::AbstractVector{<:FilterSummary}, field::Symbol, comp::Integer=1;
-    truth=nothing, nσ=2, linewidth=2
+    ax,
+    t,
+    summaries::AbstractVector{<:FilterSummary},
+    field::Symbol,
+    comp::Integer=1;
+    truth=nothing,
+    nσ=2,
+    linewidth=2,
 )
     if truth !== nothing
         series = getproperty(truth, field)[comp, :]

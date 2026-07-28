@@ -9,7 +9,7 @@ end
 struct Hermite{T} <: QuadratureNode{T} end
 
 function generate_nodes(::Type{T}, ::Hermite, n::Int) where {T}
-    return gausshermite(T, n; normalize = true)
+    return gausshermite(T, n; normalize=true)
 end
 
 struct QuadratureFilter{NT,WT}
@@ -36,7 +36,7 @@ function sigma_points(state::GaussianState, algo::QuadratureFilter)
     L = cholesky(state.Σ).L
     n = length(algo.nodes)
     indices = CartesianIndices(ntuple(_ -> n, length(state.μ)))
-    points  = map(i -> state.μ + L * view(algo.nodes, [Tuple(i)...]), indices)
+    points = map(i -> state.μ + L * view(algo.nodes, [Tuple(i)...]), indices)
     weights = map(i -> prod(view(algo.weights, [Tuple(i)...])), indices)
     return vec(points), vec(weights)
 end
@@ -72,9 +72,6 @@ function cross_cov(xs, zs, μx, μz, w::AbstractWeights)
     end
 end
 
-# Collapse weighted outer/inner nodes into a joint Gaussian. The marginals reuse the existing
-# `mean_and_cov` (within + between); only the cross term is new. `outer` may be a cloud of
-# `GaussianState`s (predict, carries process noise) or raw sigma points (update, deterministic).
 function joint_state(outer, inner::AbstractVector{<:GaussianState}, w::AbstractVector)
     w = StatsBase.weights(w)
     x = StatsBase.mean_and_cov(outer, w)
@@ -86,7 +83,9 @@ end
 _node_means(outer::AbstractVector{<:GaussianState}) = getproperty.(outer, :μ)
 _node_means(points::AbstractVector{<:AbstractVector}) = points
 
-function initialize(::AbstractRNG, prior::ConditionalPrior, algo::QuadratureFilter; kwargs...)
+function initialize(
+    ::AbstractRNG, prior::ConditionalPrior, algo::QuadratureFilter; kwargs...
+)
     x = GaussianState(prior.outer_process.μ, prior.outer_process.Σ)
     points, weights = sigma_points(x, algo)
 
@@ -96,7 +95,6 @@ function initialize(::AbstractRNG, prior::ConditionalPrior, algo::QuadratureFilt
     end
 
     z = StatsBase.mean_and_cov(inner_states, weights)
-    # prior factorizes p(x, z) = p(x) p(z | x) with independent marginals ⇒ Σxz = 0
     return JointGaussianState(x, z, zero(x.μ * z.μ'))
 end
 
@@ -106,7 +104,7 @@ function predict(
     algo::QuadratureFilter,
     iter,
     state::JointGaussianState;
-    kwargs...
+    kwargs...,
 )
     points, weights = sigma_points(state.x, algo)
 
@@ -129,7 +127,7 @@ function update(
     iter,
     state::JointGaussianState,
     data;
-    kwargs...
+    kwargs...,
 )
     points, weights = sigma_points(state.x, algo)
 

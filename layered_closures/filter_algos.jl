@@ -10,7 +10,7 @@ function predict(
     algo::KalmanFilter,
     iter::Integer,
     state::GaussianState;
-    kwargs...
+    kwargs...,
 )
     A, b, Q = fetch_parameters(dynamics, iter; kwargs...)
     return GaussianState(A * state.μ + b, A * state.Σ * A' + Q)
@@ -22,7 +22,7 @@ function update(
     iter::Integer,
     state::GaussianState,
     data;
-    kwargs...
+    kwargs...,
 )
     H, c, R = fetch_parameters(observation, iter; kwargs...)
     m = H * state.μ + c
@@ -49,7 +49,10 @@ end
 Particle(value::VT) where {VT} = Particle{VT,Float64}(value, 0.0)
 
 update_weight(state::Particle, num) = Particle(state.value, state.log_weight + num)
-update_weight(particles::Vector{<:Particle}, nums) = map((p, n) -> update_weight(p, n), particles, nums)
+function update_weight(particles::Vector{<:Particle}, log_weights)
+    map((p, log_weight) -> update_weight(p, log_weight), particles, log_weights)
+end
+
 log_weights(particles::Vector{<:Particle}) = getproperty.(particles, :log_weight)
 StatsBase.weights(particles::Vector{<:Particle}) = Weights(softmax(log_weights(particles)))
 
@@ -63,12 +66,12 @@ function predict(
     algo::BootstrapFilter,
     iter::Integer,
     state;
-    kwargs...
+    kwargs...,
 )
     return map(state) do particle
         Particle(
             SSMProblems.simulate(rng, dynamics, iter, particle.value; kwargs...),
-            particle.log_weight
+            particle.log_weight,
         )
     end
 end
@@ -79,7 +82,7 @@ function update(
     iter::Integer,
     state,
     data;
-    kwargs...
+    kwargs...,
 )
     log_increments = map(state) do particle
         SSMProblems.logdensity(observation, iter, particle.value, data; kwargs...)
@@ -105,7 +108,7 @@ function step(
     iter,
     state,
     data;
-    kwargs...
+    kwargs...,
 )
     state = resample(rng, state, algo)
     pred_state = predict(rng, model.dyn, algo, iter, state; kwargs...)
@@ -119,9 +122,7 @@ function step(rng::AbstractRNG, model::StateSpaceModel, algo, iter, state, data;
     return update(model.obs, algo, iter, pred_state, data; kwargs...)
 end
 
-function filter(
-    rng::AbstractRNG, model::StateSpaceModel, algo, data; kwargs...
-)
+function filter(rng::AbstractRNG, model::StateSpaceModel, algo, data; kwargs...)
     init_state = initialize(rng, model.prior, algo; kwargs...)
     state, ll = step(rng, model, algo, 1, init_state, data[1]; kwargs...)
     states = [state]

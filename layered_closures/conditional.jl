@@ -85,7 +85,7 @@ function predict(
     algo::KalmanFilter,
     iter::Integer,
     state;
-    kwargs...
+    kwargs...,
 )
     x = SSMProblems.simulate(rng, dynamics.outer_process, iter, state.x; kwargs...)
     z = predict(
@@ -115,11 +115,7 @@ function SSMProblems.logdensity(
     observation::ConditionalObservation, iter::Integer, state, data; kwargs...
 )
     return SSMProblems.logdensity(
-        observation.inner_process(state.x, iter; kwargs...),
-        iter,
-        state.z,
-        data;
-        kwargs...,
+        observation.inner_process(state.x, iter; kwargs...), iter, state.z, data; kwargs...
     )
 end
 
@@ -129,7 +125,7 @@ function update(
     iter::Integer,
     state,
     data;
-    kwargs...
+    kwargs...,
 )
     z, log_likelihood = update(
         observation.inner_process(state.x, iter; kwargs...),
@@ -137,7 +133,7 @@ function update(
         iter,
         state.z,
         data;
-        kwargs...
+        kwargs...,
     )
     return HierarchicalState(state.x, z), log_likelihood
 end

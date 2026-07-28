@@ -47,7 +47,7 @@ function fetch_parameters(dynamics::LinearGaussianDynamics, iter::Integer; kwarg
     return (
         compute_parameter(dynamics.A, iter; kwargs...),
         compute_parameter(dynamics.b, iter; kwargs...),
-        compute_parameter(dynamics.Q, iter; kwargs...)
+        compute_parameter(dynamics.Q, iter; kwargs...),
     )
 end
 
@@ -73,7 +73,7 @@ function fetch_parameters(observation::LinearGaussianObservation, iter; kwargs..
     return (
         compute_parameter(observation.H, iter; kwargs...),
         compute_parameter(observation.c, iter; kwargs...),
-        compute_parameter(observation.R, iter; kwargs...)
+        compute_parameter(observation.R, iter; kwargs...),
     )
 end
 

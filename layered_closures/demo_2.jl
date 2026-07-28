@@ -20,9 +20,9 @@ include("quadrature_filter.jl")
 
 ## STATIC ARRAY SUPPORT ####################################################################
 
-const StaticMvNormal{N,T} = MvNormal{T,PDMat{T,MT,Cholesky{T,MT}},VT} where {
-    N,T,MT<:StaticMatrix{N,N,T},VT<:StaticVector{N,T}
-}
+const StaticMvNormal{N,T} = MvNormal{
+    T,PDMat{T,MT,Cholesky{T,MT}},VT
+} where {N,T,MT<:StaticMatrix{N,N,T},VT<:StaticVector{N,T}}
 
 function PDMats.unwhiten(
     a::PDMat{T,AT}, x::SVector{N,T}
@@ -79,7 +79,7 @@ function stochastic_volatility_model(γ::T, σ²::T, ρ::T) where {T<:Real}
     return StateSpaceModel(
         ConditionalPrior(
             GaussianPrior(zeros(SVector{1,T}), PDMat(SMatrix{1,1,T}(I))),
-            conditional_prior(σ²)
+            conditional_prior(σ²),
         ),
         ConditionalDynamics(random_walk(γ), conditional_dynamics(ρ, σ²)),
         ConditionalObservation(conditional_observation(T)),
@@ -108,35 +108,36 @@ times = eachindex(ys)
 obs = vec(sample_matrix(ys))
 sim_states = cat(true_states)
 
-summaries = [
-    FilterSummary("QF", :blue, qf_states),
-    FilterSummary("BF", :red, bf_states),
-]
+summaries = [FilterSummary("QF", :blue, qf_states), FilterSummary("BF", :red, bf_states)]
 
-fig = Figure(size=(1400, 900))
+fig = Figure(; size=(1400, 900))
 
 # Outer state (x) - Top half, spanning both columns
-ax1 = Axis(fig[1, 1:2], title="Outer State (log-volatility)", ylabel="x")
+ax1 = Axis(fig[1, 1:2]; title="Outer State (log-volatility)", ylabel="x")
 plot_field!(ax1, times, summaries, :x; truth=sim_states)
-axislegend(ax1, position=:lt)
+axislegend(ax1; position=:lt)
 
 # Inner state (z) - Bottom left
-ax2 = Axis(fig[2, 1], title="Inner State", xlabel="Time", ylabel="z")
+ax2 = Axis(fig[2, 1]; title="Inner State", xlabel="Time", ylabel="z")
 plot_field!(ax2, times, summaries, :z; truth=sim_states)
-axislegend(ax2, position=:lt)
+axislegend(ax2; position=:lt)
 
 # Observations - Bottom right
-ax3 = Axis(fig[2, 2], title="Observations", xlabel="Time", ylabel="y")
-scatter!(ax3, times, obs, color=:black, markersize=6, label="Observed")
+ax3 = Axis(fig[2, 2]; title="Observations", xlabel="Time", ylabel="y")
+scatter!(ax3, times, obs; color=:black, markersize=6, label="Observed")
 lines!(
-    ax3, times, sim_states.z[1, :], color=:orange, linewidth=2, linestyle=:dash, label="True z"
+    ax3,
+    times,
+    sim_states.z[1, :];
+    color=:orange,
+    linewidth=2,
+    linestyle=:dash,
+    label="True z",
 )
 for s in summaries
     pred = s.mean.z[1, :]
-    lines!(
-        ax3, times, pred; color=s.color, linewidth=2, alpha=0.7, label="$(s.label) pred"
-    )
+    lines!(ax3, times, pred; color=s.color, linewidth=2, alpha=0.7, label="$(s.label) pred")
 end
-axislegend(ax3, position=:lt)
+axislegend(ax3; position=:lt)
 
 display(fig);
