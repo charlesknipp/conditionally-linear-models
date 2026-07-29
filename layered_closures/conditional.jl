@@ -5,12 +5,7 @@ struct HierarchicalState{XT,ZT}
     z::ZT
 end
 
-"""
-    JointGaussianState
-
-Similar to HierarchicalState, with the addition of the cross covariance term for accurate
-updates in the quadrature filter.
-"""
+# just so you know, I don't like this either
 struct JointGaussianState{XT,ZT,CT}
     x::XT
     z::ZT
