@@ -14,25 +14,8 @@ using Statistics
 include("linear_gaussian.jl")
 include("conditional.jl")
 include("filter_algos.jl")
-include("utilities.jl")
 include("quadrature_filter.jl")
-
-## STATIC ARRAY SUPPORT ####################################################################
-
-const StaticMvNormal{N,T} = MvNormal{
-    T,PDMat{T,MT,Cholesky{T,MT}},VT
-} where {N,T,MT<:StaticMatrix{N,N,T},VT<:StaticVector{N,T}}
-
-function PDMats.unwhiten(
-    a::PDMat{T,AT}, x::SVector{N,T}
-) where {T<:Real,N,AT<:StaticMatrix{N,N,T}}
-    return PDMats.chol_lower(cholesky(a)) * x
-end
-
-# this should singlehandedly fix sampling from Static MvNormal
-function Random.rand(rng::AbstractRNG, d::StaticMvNormal{N,T}) where {N,T<:Real}
-    return d.μ + PDMats.unwhiten(d.Σ, SVector{N,T}(randn(rng, N)))
-end
+include("utilities.jl")
 
 ## STOCHASTIC VOLATILITY MODEL #############################################################
 
@@ -53,11 +36,9 @@ end
 
 # closes over A and b
 function conditional_dynamics(σ²::T, ρ::T) where {T<:Real}
-    # A = ρ * ones(SMatrix{1,1,T})
     b = zeros(SVector{1,T})
     Q = PDMat(SMatrix{1,1,T}(σ²))
     function inner_process(state, iter; kwargs...)
-        # Q = PDMat(SMatrix{1,1,T}(exp(state[1])))
         A = logistic(state[1]) * ones(SMatrix{1,1,T})
         return LinearGaussianDynamics(A, b, Q)
     end
@@ -94,7 +75,7 @@ rng = MersenneTwister(123)
 _, true_states, ys = sample(rng, model, 100);
 
 println("\n\n[Quadrature Filter (N=4)]")
-qf_states, qll = filter(rng, model, QuadratureFilter(16), ys);
+qf_states, qll = filter(rng, model, QuadratureFilter(4), ys);
 
 println("\n\n[Bootstrap Filter (N=1024)]")
 bf_states, bll = filter(rng, model, BootstrapFilter(2^10), ys);

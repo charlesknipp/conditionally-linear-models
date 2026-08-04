@@ -3,6 +3,32 @@
 compute_parameter(param::AbstractArray, args...; kwargs...) = param
 compute_parameter(param::Function, args...; kwargs...) = param(args...; kwargs...)
 
+## NONLINEAR GAUSSIAN PROCESSES ############################################################
+
+struct GaussianDynamics{FT,QT} <: LatentDynamics
+    f::FT
+    Q::QT
+end
+
+function SSMProblems.distribution(
+    dynamics::GaussianDynamics, iter::Integer, state; kwargs...
+)
+    Q = compute_parameter(dynamics.Q, iter; kwargs...)
+    return MvNormal(dynamics.f(state, iter; kwargs...), Q)
+end
+
+struct GaussianObservation{GT,RT} <: ObservationProcess
+    g::GT
+    R::RT
+end
+
+function SSMProblems.distribution(
+    observation::GaussianObservation, iter::Integer, state; kwargs...
+)
+    R = compute_parameter(observation.R, iter; kwargs...)
+    return MvNormal(observation.g(state, iter; kwargs...), R)
+end
+
 ## LINEAR GAUSSIAN PROCESSES ###############################################################
 
 struct KalmanFilter end

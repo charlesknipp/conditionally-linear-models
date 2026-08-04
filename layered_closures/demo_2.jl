@@ -15,25 +15,8 @@ using Statistics
 include("linear_gaussian.jl")
 include("conditional.jl")
 include("filter_algos.jl")
-include("utilities.jl")
 include("quadrature_filter.jl")
-
-## STATIC ARRAY SUPPORT ####################################################################
-
-const StaticMvNormal{N,T} = MvNormal{
-    T,PDMat{T,MT,Cholesky{T,MT}},VT
-} where {N,T,MT<:StaticMatrix{N,N,T},VT<:StaticVector{N,T}}
-
-function PDMats.unwhiten(
-    a::PDMat{T,AT}, x::SVector{N,T}
-) where {T<:Real,N,AT<:StaticMatrix{N,N,T}}
-    return PDMats.chol_lower(cholesky(a)) * x
-end
-
-# this should singlehandedly fix sampling from Static MvNormal
-function Random.rand(rng::AbstractRNG, d::StaticMvNormal{N,T}) where {N,T<:Real}
-    return d.μ + PDMats.unwhiten(d.Σ, SVector{N,T}(randn(rng, N)))
-end
+include("utilities.jl")
 
 ## STOCHASTIC VOLATILITY MODEL #############################################################
 
@@ -94,50 +77,50 @@ _, true_states, ys = sample(rng, model, 100);
 
 println("\n\n[Quadrature Filter (N=4)]")
 qf_states, _ = filter(rng, model, QuadratureFilter(4), ys);
-# bm1 = @benchmark filter($(rng), $(model), $(QuadratureFilter(4)), $(ys))
-# show(stdout, "text/plain", median(bm1))
+bm1 = @benchmark filter($(rng), $(model), $(QuadratureFilter(4)), $(ys))
+show(stdout, "text/plain", median(bm1))
 
 println("\n\n[Bootstrap Filter (N=1024)]")
 bf_states, _ = filter(rng, model, BootstrapFilter(2^10), ys);
-# bm2 = @benchmark filter($(rng), $(model), $(BootstrapFilter(2^10)), $(ys))
-# show(stdout, "text/plain", median(bm2))
+bm2 = @benchmark filter($(rng), $(model), $(BootstrapFilter(2^10)), $(ys))
+show(stdout, "text/plain", median(bm2))
 
 ## PLOTTING ################################################################################
 
-# times = eachindex(ys)
-# obs = vec(sample_matrix(ys))
-# sim_states = cat(true_states)
+times = eachindex(ys)
+obs = vec(sample_matrix(ys))
+sim_states = cat(true_states)
 
-# summaries = [FilterSummary("QF", :blue, qf_states), FilterSummary("BF", :red, bf_states)]
+summaries = [FilterSummary("QF", :blue, qf_states), FilterSummary("BF", :red, bf_states)]
 
-# fig = Figure(; size=(1400, 900))
+fig = Figure(; size=(1400, 900))
 
-# # Outer state (x) - Top half, spanning both columns
-# ax1 = Axis(fig[1, 1:2]; title="Outer State (log-volatility)", ylabel="x")
-# plot_field!(ax1, times, summaries, :x; truth=sim_states)
-# axislegend(ax1; position=:lt)
+# Outer state (x) - Top half, spanning both columns
+ax1 = Axis(fig[1, 1:2]; title="Outer State (log-volatility)", ylabel="x")
+plot_field!(ax1, times, summaries, :x; truth=sim_states)
+axislegend(ax1; position=:lt)
 
-# # Inner state (z) - Bottom left
-# ax2 = Axis(fig[2, 1]; title="Inner State", xlabel="Time", ylabel="z")
-# plot_field!(ax2, times, summaries, :z; truth=sim_states)
-# axislegend(ax2; position=:lt)
+# Inner state (z) - Bottom left
+ax2 = Axis(fig[2, 1]; title="Inner State", xlabel="Time", ylabel="z")
+plot_field!(ax2, times, summaries, :z; truth=sim_states)
+axislegend(ax2; position=:lt)
 
-# # Observations - Bottom right
-# ax3 = Axis(fig[2, 2]; title="Observations", xlabel="Time", ylabel="y")
-# scatter!(ax3, times, obs; color=:black, markersize=6, label="Observed")
-# lines!(
-#     ax3,
-#     times,
-#     sim_states.z[1, :];
-#     color=:orange,
-#     linewidth=2,
-#     linestyle=:dash,
-#     label="True z",
-# )
-# for s in summaries
-#     pred = s.mean.z[1, :]
-#     lines!(ax3, times, pred; color=s.color, linewidth=2, alpha=0.7, label="$(s.label) pred")
-# end
-# axislegend(ax3; position=:lt)
+# Observations - Bottom right
+ax3 = Axis(fig[2, 2]; title="Observations", xlabel="Time", ylabel="y")
+scatter!(ax3, times, obs; color=:black, markersize=6, label="Observed")
+lines!(
+    ax3,
+    times,
+    sim_states.z[1, :];
+    color=:orange,
+    linewidth=2,
+    linestyle=:dash,
+    label="True z",
+)
+for s in summaries
+    pred = s.mean.z[1, :]
+    lines!(ax3, times, pred; color=s.color, linewidth=2, alpha=0.7, label="$(s.label) pred")
+end
+axislegend(ax3; position=:lt)
 
-# display(fig);
+display(fig);

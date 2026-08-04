@@ -1,12 +1,12 @@
 ## SAMPLER STATE STATISTICS ################################################################
-#
+
 # The goal here is to lean on StatsBase's optimized weighted/unweighted mean, var, and cov
 # routines rather than hand-rolling reductions. The only friction is that our sampler point
 # clouds are stored as `Vector{<:StaticVector}` (or `Vector{<:Particle}` wrapping them),
 # which StatsBase's matrix methods do not accept directly. We bridge that gap with a
 # zero-copy `reinterpret(reshape, ...)` view, materializing to a dense `Matrix` only for the
 # `cov` methods that genuinely require a `DenseMatrix`.
-#
+
 # Convention for the matrix view: rows index the state dimension, columns index the samples.
 # Hence every StatsBase call reduces along `dims = 2`.
 
@@ -56,7 +56,7 @@ StatsBase.var(state::HierarchicalState) = HierarchicalState(var(state.x), var(st
 StatsBase.cov(state::HierarchicalState) = HierarchicalState(cov(state.x), cov(state.z))
 
 ## JOINT GAUSSIAN STATE (single distribution) ##############################################
-#
+
 # Present the joint posterior as a HierarchicalState of its marginals so the existing
 # `cat`/`FilterSummary` plotting path is unchanged; the cross covariance Σxz is internal to
 # the quadrature filter's conditioning and is not needed for the marginal summaries.
@@ -65,7 +65,7 @@ StatsBase.mean(state::JointGaussianState) = HierarchicalState(mean(state.x), mea
 StatsBase.var(state::JointGaussianState) = HierarchicalState(var(state.x), var(state.z))
 
 ## WEIGHTED POINT CLOUDS ###################################################################
-#
+
 # A collection of samples (each a vector) plus weights. We hand the reinterpreted matrix
 # straight to StatsBase and rebuild a static result. `cov`/`var` use the biased (population)
 # estimator since the weights are normalized filter weights, not frequency counts.
@@ -83,7 +83,7 @@ function StatsBase.cov(x::AbstractVector{<:AbstractVector}, w::AbstractWeights)
 end
 
 ## HIERARCHICAL STATE CLOUDS ###############################################################
-#
+
 # A weighted collection of hierarchical states just recurses component-wise.
 
 function StatsBase.mean(states::AbstractVector{<:HierarchicalState}, w::AbstractWeights)
@@ -105,7 +105,7 @@ function StatsBase.cov(states::AbstractVector{<:HierarchicalState}, w::AbstractW
 end
 
 ## PARTICLE CLOUDS #########################################################################
-#
+
 # Particles carry their own log weights, so the public API takes no weights argument: we
 # recover the normalized weights internally and forward the values to the weighted methods.
 
@@ -122,14 +122,14 @@ function StatsBase.cov(particles::AbstractVector{<:Particle})
 end
 
 ## GAUSSIAN MIXTURES (Rao-Blackwellised) ###################################################
-#
+
 # The quadrature filter marginalizes each component analytically, so a weighted collection
 # of `GaussianState`s is a Gaussian mixture. Its moments follow the law of total covariance:
-#
+
 #     E[X]   = Σ wᵢ μᵢ
 #     Cov[X] = Σ wᵢ Σᵢ            (within-component / expected covariance)
 #            + Cov(μ₁, …, μₙ; w)   (between-component / spread of the means)
-#
+
 # The between-component term is exactly a weighted `cov` over the component means, so we hook
 # straight into StatsBase for it and only average the component covariances by hand.
 
@@ -138,7 +138,7 @@ function StatsBase.mean_and_cov(states::AbstractVector{<:GaussianState}, w::Abst
     Σs = getproperty.(states, :Σ)
 
     μ = StatsBase.mean(μs, w)
-    within = StatsBase.mean(Σs, w)                                  # Σ wᵢ Σᵢ
+    within = StatsBase.mean(Σs, w)
     between = _rebuild_matrix(
         μs, StatsBase.cov(dense_sample_matrix(μs), w, 2; corrected=false)
     )
@@ -231,4 +231,21 @@ function plot_field!(
         plot_band!(ax, t, means, stds; linewidth, color=s.color, label=s.label, nσ=nσ)
     end
     return ax
+end
+
+## STATIC ARRAY SUPPORT ####################################################################
+
+const StaticMvNormal{N,T} = MvNormal{
+    T,PDMat{T,MT,Cholesky{T,MT}},VT
+} where {N,T,MT<:StaticMatrix{N,N,T},VT<:StaticVector{N,T}}
+
+function PDMats.unwhiten(
+    a::PDMat{T,AT}, x::SVector{N,T}
+) where {T<:Real,N,AT<:StaticMatrix{N,N,T}}
+    return PDMats.chol_lower(cholesky(a)) * x
+end
+
+# this should singlehandedly fix sampling from Static MvNormal
+function Random.rand(rng::AbstractRNG, d::StaticMvNormal{N,T}) where {N,T<:Real}
+    return d.μ + PDMats.unwhiten(d.Σ, SVector{N,T}(randn(rng, N)))
 end

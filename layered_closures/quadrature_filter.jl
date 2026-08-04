@@ -15,6 +15,9 @@ end
 struct QuadratureFilter{NT,WT}
     nodes::NT
     weights::WT
+    function QuadratureFilter(nodes::NT, weights::WT) where {NT,WT}
+        return new{NT,WT}(nodes, weights)
+    end
 end
 
 function QuadratureFilter(basis::QuadratureNode, n::Integer)
@@ -30,15 +33,7 @@ struct QuadraturePoints{NT,WT}
     weights::WT
 end
 
-struct QuadratureState{QT<:QuadraturePoints,XT,ZT}
-    points::QT
-    state::HierarchicalState{XT,ZT}
-end
-
-sigma_points(state::QuadratureState) = state.points
-
-inner(state::QuadratureState) = state.state.z
-outer(state::QuadratureState) = state.state.x
+StatsBase.weights(points::QuadraturePoints) = StatsBase.weights(points.weights)
 
 """
     sigma_points(state::GaussianState, algo::QuadratureFilter)
@@ -48,42 +43,123 @@ Returns (points, weights) where points is a length-`n^dim` vector of `SVector`s 
 node) and weights is a vector of the same length.
 """
 function sigma_points(state::GaussianState, algo::QuadratureFilter)
-    L = cholesky(state.Σ).L
-    n = length(algo.nodes)
-    indices = CartesianIndices(ntuple(_ -> n, length(state.μ)))
+    L = cholesky(Symmetric(state.Σ)).L
+    indices = CartesianIndices(ntuple(_ -> length(algo.nodes), length(state.μ)))
     points = map(i -> state.μ + L * view(algo.nodes, [Tuple(i)...]), indices)
     weights = map(i -> prod(view(algo.weights, [Tuple(i)...])), indices)
     return QuadraturePoints(vec(points), vec(weights))
 end
 
-## RAO-BLACKWELLISED QUADRATURE FILTER ####################################################
+## FILTERING LOOP ##########################################################################
 
-# I still don't know if this condition bullshit makes sense in a marginalized filter
-function condition(state::JointGaussianState, xi)
-    K = (state.x.Σ \ state.Σxz)'
-    μ = state.z.μ + K * (xi - state.x.μ)
-    Σ = state.z.Σ - K * state.Σxz
-    return GaussianState(μ, Σ)
+function initialize(::AbstractRNG, prior::GaussianPrior, ::QuadratureFilter; kwargs...)
+    return GaussianState(prior.μ, prior.Σ)
 end
 
-function cross_cov(xs, zs, μx, μz, w::AbstractWeights)
-    return mapreduce(+, xs, zs, w) do x, z, wi
-        wi * (x - μx) * (z - μz)'
+function predict(
+    rng::AbstractRNG,
+    dynamics::GaussianDynamics,
+    algo::QuadratureFilter,
+    iter,
+    state::GaussianState;
+    kwargs...,
+)
+    points = sigma_points(state, algo)
+    Q = compute_parameter(dynamics.Q, iter; kwargs...)
+    pred_states = map(points.nodes) do node
+        dynamics.f(node, iter; kwargs...)
+    end
+
+    # compute the weighted statistics
+    weights = StatsBase.weights(points)
+    μ = StatsBase.mean(pred_states, weights)
+    Σxx = wcov(pred_states, μ, weights)
+    return GaussianState(μ, Σxx + Q)
+end
+
+function update(
+    observation::GaussianObservation,
+    algo::QuadratureFilter,
+    iter,
+    state::GaussianState,
+    data;
+    kwargs...,
+)
+    points = sigma_points(state, algo)
+    R = compute_parameter(observation.R, iter; kwargs...)
+    pred_states = map(points.nodes) do node
+        observation.g(node, iter; kwargs...)
+    end
+
+    # compute the weighted statistics
+    weights = StatsBase.weights(points.weights)
+    μ = StatsBase.mean(pred_states, weights)
+    Σyx = wcov(points.nodes, pred_states, state.μ, μ, weights)
+    Σxx = wcov(pred_states, μ, weights)
+
+    # Kalman update step
+    z = data - μ
+    S = Σxx + R
+    K = Σyx / S
+    return GaussianState(state.μ + K * z, state.Σ - K * Σyx'), loglikelihood(z, S)
+end
+
+## UTILITIES ###############################################################################
+
+function wcov(
+    X::Vector{XT}, Y::Vector{YT}, μx::XT, μy::YT, weights::AbstractWeights
+) where {XT,YT}
+    return mapreduce(+, X, Y, weights) do x, y, weight
+        weight * (x - μx) * (y - μy)'
     end
 end
 
-function JointGaussianState(
-    outer::AbstractVector{<:GaussianState},
-    inner::AbstractVector{<:GaussianState},
-    w::AbstractVector
-)
-    w = StatsBase.weights(w)
-    x = StatsBase.mean_and_cov(outer, w)
-    z = StatsBase.mean_and_cov(inner, w)
-    Σxz = cross_cov(getproperty.(outer, :μ), getproperty.(inner, :μ), x.μ, z.μ, w)
-    return JointGaussianState(x, z, Σxz)
+function wcov(X::Vector{XT}, μx::XT, weights::AbstractWeights) where {XT}
+    return mapreduce(+, X, weights) do x, weight
+        weight * (x - μx) * (x - μx)'
+    end
 end
 
+# should I use a HierarchicalState here?
+struct JointGaussianState{XT<:GaussianState,ZT<:GaussianState,ΣT}
+    x::XT
+    z::ZT
+    Σ::ΣT
+end
+
+# TODO: this is a little sloppy
+function JointGaussianState(
+    outer_states::Vector{XT}, inner_states::Vector{ZT}, weights::AbstractWeights
+) where {XT<:GaussianState,ZT<:GaussianState}
+    inner_means = getproperty.(inner_states, :μ)
+    outer_means = getproperty.(outer_states, :μ)
+
+    inner_state = GaussianState(inner_states, weights)
+    outer_state = GaussianState(outer_states, weights)
+
+    cross_cov = wcov(outer_means, inner_means, outer_state.μ, inner_state.μ, weights)
+    return JointGaussianState(outer_state, inner_state, cross_cov)
+end
+
+function conditioner(state::JointGaussianState)
+    gain = state.Σ' / state.x.Σ
+    return node -> GaussianState(
+        state.z.μ + gain * (node - state.x.μ),
+        state.z.Σ - gain * state.Σ,
+    )
+end
+
+# TODO: this is similarly sloppy
+function GaussianState(states::Vector{T}, weights::AbstractWeights) where {T<:GaussianState}
+    pred_states = getproperty.(states, :μ)
+    μ = StatsBase.mean(pred_states, weights)
+    Σ = StatsBase.mean(getproperty.(states, :Σ), weights) + wcov(pred_states, μ, weights)
+    return GaussianState(μ, Σ)
+end
+
+## RAO BLACKWELLIZATION ####################################################################
+
+# TODO: I feel like this could use some cleaning up
 function initialize(
     ::AbstractRNG, prior::ConditionalPrior, algo::QuadratureFilter; kwargs...
 )
@@ -94,8 +170,7 @@ function initialize(
         inner_prior = prior.inner_process(x; kwargs...)
         GaussianState(inner_prior.μ, inner_prior.Σ)
     end
-
-    z = StatsBase.mean_and_cov(inner_states, points.weights)
+    z = GaussianState(inner_states, StatsBase.Weights(points.weights))
     return JointGaussianState(x, z, zero(x.μ * z.μ'))
 end
 
@@ -104,44 +179,48 @@ function predict(
     dynamics::ConditionalDynamics,
     algo::QuadratureFilter,
     iter,
-    state::JointGaussianState;
+    state;
     kwargs...,
 )
+    # use Gaussian quadrature for the outer states
     points = sigma_points(state.x, algo)
-
-    outer_states = map(points.nodes) do x
-        dist = SSMProblems.distribution(dynamics.outer_process, iter, x)
+    outer_states = map(points.nodes) do node
+        dist = SSMProblems.distribution(dynamics.outer_process, iter, node; kwargs...)
         GaussianState(mean(dist), cov(dist))
     end
 
-    inner_states = map(outer_states) do x
-        inner_dyn = dynamics.inner_process(x.μ, iter; kwargs...)
-        predict(rng, inner_dyn, KalmanFilter(), iter, condition(state, x.μ); kwargs...)
+    # update the cross covariance and predict the submodel dynamics
+    correct = conditioner(state)
+    inner_states = map(points.nodes) do node
+        inner_dyn = dynamics.inner_process(node, iter; kwargs...)
+        predict(rng, inner_dyn, KalmanFilter(), iter, correct(node); kwargs...)
     end
 
-    # should I add SSMProblems.logdensity evals to the weights?
-    return QuadratureState(points, HierarchicalState(outer_states, inner_states))
+    # return the states as particles, then accumulate later
+    return (points, outer_states, inner_states)
 end
 
-# TODO: clean this up
 function update(
     observation::ConditionalObservation,
-    ::QuadratureFilter,
+    algo::QuadratureFilter,
     iter,
-    state::QuadratureState,
+    state,
     data;
-    kwargs...,
+    kwargs...
 )
-    inner_states = inner(state)
-    outer_states = outer(state)
-    points = sigma_points(state)
-    results = map(eachindex(points.weights)) do i
-        inner_obs = observation.inner_process(outer_states[i].μ, iter; kwargs...)
-        z, ll = update(inner_obs, KalmanFilter(), iter, inner_states[i], data; kwargs...)
-        (z, log(points.weights[i]) + ll)
+    # perform a Kalman update per node
+    points, outer_states, inner_states = state
+    results = map(outer_states, inner_states, points.weights) do node, inner_node, weight
+        inner_obs = observation.inner_process(node.μ, iter; kwargs...)
+        z, ll = update(inner_obs, KalmanFilter(), iter, inner_node, data; kwargs...)
+        (z, log(weight) + ll)
     end
 
+    # account for the new log-weights
     log_weights = map(last, results)
-    weights = softmax(log_weights)
-    return joint_state(outer_states, map(first, results), weights), logsumexp(log_weights)
+    weights = StatsBase.weights(softmax(log_weights))
+    inner_states = map(first, results)
+
+    # combine the posterior and predictive particles with the updated sigma point weights
+    return JointGaussianState(outer_states, inner_states, weights), logsumexp(log_weights)
 end

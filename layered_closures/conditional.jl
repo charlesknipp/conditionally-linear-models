@@ -5,13 +5,6 @@ struct HierarchicalState{XT,ZT}
     z::ZT
 end
 
-# just so you know, I don't like this either
-struct JointGaussianState{XT,ZT,CT}
-    x::XT
-    z::ZT
-    Σxz::CT
-end
-
 """
     ConditionalPrior
 
