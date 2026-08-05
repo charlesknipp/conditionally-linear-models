@@ -14,7 +14,7 @@ using Statistics
 include("linear_gaussian.jl")
 include("conditional.jl")
 include("filter_algos.jl")
-include("quadrature_filter.jl")
+include("sigma_points.jl")
 include("utilities.jl")
 
 ## STOCHASTIC VOLATILITY MODEL #############################################################
@@ -74,19 +74,37 @@ model = stochastic_volatility_model(0.02, 0.01, 0.8)
 rng = MersenneTwister(123)
 _, true_states, ys = sample(rng, model, 100);
 
-println("\n\n[Quadrature Filter (N=4)]")
 qf_states, qll = filter(rng, model, QuadratureFilter(4), ys);
-
-println("\n\n[Bootstrap Filter (N=1024)]")
+uf_states, ull = filter(rng, model, UnscentedFilter(), ys);
 bf_states, bll = filter(rng, model, BootstrapFilter(2^10), ys);
+
+## RMSE + LOG-LIKELIHOOD ###################################################################
+
+sim_states = cat_trajectory(true_states)
+
+# RMSE of a filter's outer/inner posterior mean against the simulated truth
+function field_rmse(states, truth)
+    est = cat_trajectory(map(mean, states))
+    return (x=sqrt(mean(abs2, est.x .- truth.x)), z=sqrt(mean(abs2, est.z .- truth.z)))
+end
+
+for (label, states, ll) in
+    (("QF", qf_states, qll), ("UKF", uf_states, ull), ("BF", bf_states, bll))
+    rmse = field_rmse(states, sim_states)
+    @printf("%-4s  RMSE(x)=%.4f  RMSE(z)=%.4f  loglik=%.3f\n", label, rmse.x, rmse.z, ll)
+end
 
 ## PLOTTING ################################################################################
 
 times = eachindex(ys)
 obs = vec(sample_matrix(ys))
-sim_states = cat(true_states)
+sim_states = cat_trajectory(true_states)
 
-summaries = [FilterSummary("QF", :blue, qf_states), FilterSummary("BF", :red, bf_states)]
+summaries = [
+    FilterSummary("QF", :blue, qf_states),
+    FilterSummary("UKF", :green, uf_states),
+    FilterSummary("BF", :red, bf_states)
+]
 
 fig = Figure(; size=(1400, 900))
 

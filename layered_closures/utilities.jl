@@ -162,14 +162,12 @@ end
 
 ## EXTRACT STATISTICS FOR PLOTTING #########################################################
 
-function Base.cat(states::Vector{<:HierarchicalState})
-    return HierarchicalState(
-        sample_matrix(getproperty.(states, :x)), sample_matrix(getproperty.(states, :z))
-    )
-end
+cat_trajectory(states::AbstractVector) = sample_matrix(states)
+cat_trajectory(states::Vector{<:HierarchicalState}) = HierarchicalState(
+    sample_matrix(getproperty.(states, :x)), sample_matrix(getproperty.(states, :z))
+)
 
-# Apply a function componentwise to each field of a HierarchicalState. Lets a single call
-# turn a variance HierarchicalState into a standard-deviation one, etc.
+map_fields(f, state::AbstractArray) = f.(state)
 map_fields(f, state::HierarchicalState) = HierarchicalState(f.(state.x), f.(state.z))
 
 """
@@ -188,8 +186,8 @@ struct FilterSummary{MT,ST}
 end
 
 function FilterSummary(label::AbstractString, color::Symbol, states::AbstractVector)
-    means = cat(map(StatsBase.mean, states))
-    stds = map_fields(sqrt, cat(map(StatsBase.var, states)))
+    means = cat_trajectory(map(StatsBase.mean, states))
+    stds = map_fields(sqrt, cat_trajectory(map(StatsBase.var, states)))
     return FilterSummary(label, color, means, stds)
 end
 
@@ -228,6 +226,27 @@ function plot_field!(
     for s in summaries
         means = getproperty(s.mean, field)[comp, :]
         stds = getproperty(s.std, field)[comp, :]
+        plot_band!(ax, t, means, stds; linewidth, color=s.color, label=s.label, nσ=nσ)
+    end
+    return ax
+end
+
+function plot_component!(
+    ax,
+    t,
+    summaries::AbstractVector{<:FilterSummary},
+    comp::Integer=1;
+    truth=nothing,
+    nσ=2,
+    linewidth=2,
+)
+    if truth !== nothing
+        series = truth[comp, :]
+        lines!(ax, t, series; color=:black, linewidth, label="True")
+    end
+    for s in summaries
+        means = s.mean[comp, :]
+        stds = s.std[comp, :]
         plot_band!(ax, t, means, stds; linewidth, color=s.color, label=s.label, nσ=nσ)
     end
     return ax
