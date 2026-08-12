@@ -81,8 +81,8 @@ bm1 = @benchmark filter($(rng), $(model), $(QuadratureFilter(4)), $(ys))
 show(stdout, "text/plain", median(bm1))
 
 println("\n\n[Unscented Kalman Filter]")
-uf_states, ull = filter(rng, model, UnscentedKalmanFilter(), ys);
-bm2 = @benchmark filter($(rng), $(model), $(UnscentedKalmanFilter()), $(ys))
+uf_states, ull = filter(rng, model, UnscentedFilter(), ys);
+bm2 = @benchmark filter($(rng), $(model), $(UnscentedFilter()), $(ys))
 show(stdout, "text/plain", median(bm2))
 
 println("\n\n[Bootstrap Filter (N=1024)]")
