@@ -2,6 +2,7 @@ using BenchmarkTools
 using CairoMakie
 using Distributions
 using FastGaussQuadrature
+using ForwardDiff
 using SSMProblems
 using LinearAlgebra
 using LogExpFunctions
@@ -152,3 +153,26 @@ end
 axislegend(ax3; position=:lt)
 
 display(fig);
+
+## TAKING GRADIENTS ########################################################################
+
+model = stochastic_volatility_model(0.2, 0.1, 0.7)
+rng = MersenneTwister(123)
+_, true_states, ys = sample(rng, model, 100);
+
+function loglike(θ::AbstractVector{T}) where {T}
+    model = stochastic_volatility_model(θ...)
+    _, ℓ = filter(Xoshiro(1234), model, QuadratureFilter(Hermite{T}(), 4), ys)
+    return ℓ
+end
+
+# gradients seem to exhibit feedback for all parameters!
+ForwardDiff.gradient(loglike, [0.05, 0.1, 0.7])
+
+# this looks especially good for the damping factor
+∇ρ = map(0.05:0.05:1) do ρ
+    ForwardDiff.gradient([ρ]) do θ
+        model = stochastic_volatility_model(0.05, 0.1, only(θ))
+        filter(Xoshiro(1234), model, QuadratureFilter(4), ys)[2]
+    end
+end
