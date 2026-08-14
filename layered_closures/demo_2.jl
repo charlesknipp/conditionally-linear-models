@@ -69,6 +69,10 @@ function stochastic_volatility_model(γ::T, σ²::T, ρ::T) where {T<:Real}
     )
 end
 
+function stochastic_volatility_model(γ::Real, σ²::Real, ρ::Real)
+    return stochastic_volatility_model(Base.promote(γ, σ², ρ)...)
+end
+
 ## FILTERING COMPARISON ####################################################################
 
 model = stochastic_volatility_model(0.05, 0.1, 0.7)

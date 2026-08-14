@@ -43,6 +43,10 @@ function demo_model(φ1::T, φ2::T, ω::T, σx::T, σy::T) where {T}
     )
 end
 
+function demo_model(φ1::Real, φ2::Real, ω::Real, σx::Real, σy::Real)
+    return demo_model(Base.promote(φ1, φ2, ω, σx, σy)...)
+end
+
 ## DEMO + PLOTS ############################################################################
 
 model = demo_model(0.2, 0.01, 1.2, 10.0, 0.01)
